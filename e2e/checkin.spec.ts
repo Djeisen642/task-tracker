@@ -1,0 +1,225 @@
+/**
+ * The check-in loop, driven end to end in a browser.
+ *
+ * These assertions are deliberately about things the unit suite *cannot* see:
+ * that the controller finds its elements, that clicks reach the model, that a
+ * finished check-in lands on disk as valid Markdown, and that the scheduler
+ * behaves across a simulated restart.
+ */
+
+import { expect, test } from '@playwright/test';
+
+import { advanceMinutes, dayFile, listVaultFiles, readVaultFile, startApp } from './harness.ts';
+
+/** Fail loudly on any uncaught page error — a dead app often logs before it dies. */
+test.beforeEach(({ page }) => {
+  page.on('pageerror', (error) => {
+    throw new Error(`Uncaught page error: ${error.message}`);
+  });
+});
+
+test('opens a fresh day with the day-start check-in', async ({ page }) => {
+  await startApp(page);
+
+  await expect(page.locator('#card')).toHaveClass(/is-open/);
+  await expect(page.locator('#headline')).toHaveText("Here's your day");
+  await expect(page.locator('#empty-state')).toBeVisible();
+});
+
+test('shows the day-start prompt on a late start, not an hourly nudge', async ({ page }) => {
+  // Machine was off at 09:00; first launch of the day is at 14:20.
+  await startApp(page, { now: new Date(2026, 7, 3, 14, 20) });
+
+  await expect(page.locator('#headline')).toHaveText("Here's your day");
+});
+
+test('adds a task and renders it', async ({ page }) => {
+  await startApp(page);
+
+  await page.fill('#task-input', 'Draft the migration RFC');
+  await page.press('#task-input', 'Enter');
+
+  await expect(page.locator('.task-title')).toHaveText('Draft the migration RFC');
+  await expect(page.locator('#empty-state')).toBeHidden();
+  // The input clears so the next task can be typed straight away.
+  await expect(page.locator('#task-input')).toHaveValue('');
+});
+
+test('cycles a task through its three states', async ({ page }) => {
+  await startApp(page);
+
+  await page.fill('#task-input', 'Ship the rollback');
+  await page.press('#task-input', 'Enter');
+
+  const task = page.locator('.task').first();
+  await expect(task).not.toHaveClass(/is-in-progress|is-completed/);
+
+  await task.locator('.task-toggle').click();
+  await expect(task).toHaveClass(/is-in-progress/);
+
+  await task.locator('.task-toggle').click();
+  await expect(task).toHaveClass(/is-completed/);
+
+  await task.locator('.task-toggle').click();
+  await expect(task).not.toHaveClass(/is-in-progress|is-completed/);
+});
+
+test('removes a task', async ({ page }) => {
+  await startApp(page);
+
+  await page.fill('#task-input', 'Delete me');
+  await page.press('#task-input', 'Enter');
+  await expect(page.locator('.task')).toHaveCount(1);
+
+  await page.locator('.task-remove').click();
+  await expect(page.locator('.task')).toHaveCount(0);
+  await expect(page.locator('#empty-state')).toBeVisible();
+});
+
+test('writes a well-formed day file when the check-in is finished', async ({ page }) => {
+  await startApp(page);
+
+  await page.fill('#task-input', 'Ship the rollback');
+  await page.press('#task-input', 'Enter');
+  await page.locator('.task-toggle').first().click();
+
+  await page.fill('#note-input', '@alice unblocked the release #kudos');
+  await page.press('#note-input', 'Enter');
+
+  await page.click('#done');
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+
+  const contents = await readVaultFile(page, '2026-08-03.md');
+  expect(contents).not.toBeNull();
+  expect(contents).toContain('date: 2026-08-03');
+  expect(contents).toContain('# Monday, 3 August 2026');
+  expect(contents).toContain('- [/] Ship the rollback');
+  expect(contents).toContain('- 10:30 — @alice unblocked the release #kudos');
+  // The scheduler's memory, without which a restart re-prompts.
+  expect(contents).toContain('last_check_in: 10:00');
+});
+
+test('publishes the agent guide into the vault on launch', async ({ page }) => {
+  await startApp(page);
+
+  expect(await listVaultFiles(page)).toContain('CONTEXT.md');
+  const guide = await readVaultFile(page, 'CONTEXT.md');
+  expect(guide).toContain('Task Tracker');
+  expect(guide).toContain('#kudos');
+});
+
+test("carries yesterday's unfinished work into today", async ({ page }) => {
+  await startApp(page, {
+    files: {
+      '2026-07-31.md': dayFile('2026-07-31', [
+        { title: 'Carried over', marker: '/' },
+        { title: 'Also carried', marker: ' ' },
+        { title: 'Already finished', marker: 'x' },
+      ]),
+    },
+  });
+
+  const titles = page.locator('.task-title');
+  await expect(titles).toHaveText(['Carried over', 'Also carried']);
+  // The marker that says "this one keeps slipping".
+  await expect(page.locator('.task').first()).toHaveClass(/is-carried/);
+});
+
+test('does not re-prompt for a check-in completed before a restart', async ({ page }) => {
+  // The regression: scheduler state used to live only in memory, so relaunching
+  // mid-morning re-asked for a check-in the user had already finished.
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 10, 45),
+    files: { '2026-08-03.md': dayFile('2026-08-03', [], { lastCheckIn: '10:00' }) },
+  });
+
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+});
+
+test('prompts again at the next hour', async ({ page }) => {
+  await startApp(page);
+
+  await page.click('#done');
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+
+  await advanceMinutes(page, 31);
+  await expect(page.locator('#card')).toHaveClass(/is-open/);
+  await expect(page.locator('#headline')).toHaveText('Quick check-in');
+});
+
+test('Esc snoozes, and the card returns when the snooze lapses', async ({ page }) => {
+  await startApp(page);
+
+  await page.press('body', 'Escape');
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+
+  await advanceMinutes(page, 5);
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+
+  await advanceMinutes(page, 7);
+  await expect(page.locator('#card')).toHaveClass(/is-open/);
+});
+
+test('copies a standup summary to the clipboard', async ({ page }) => {
+  await startApp(page, {
+    files: {
+      '2026-07-31.md': dayFile('2026-07-31', [{ title: 'Finished on Friday', marker: 'x' }]),
+    },
+  });
+
+  await page.fill('#task-input', 'Today’s work');
+  await page.press('#task-input', 'Enter');
+  await page.click('#copy-standup');
+
+  await expect(page.locator('#status')).toHaveClass(/is-visible/);
+  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clipboard).toContain('Finished on Friday');
+  expect(clipboard).toContain('Today’s work');
+});
+
+test('renders task titles as text, never as markup', async ({ page }) => {
+  // Vault content round-trips through files other tools can write.
+  await startApp(page);
+
+  await page.fill('#task-input', '<img src=x onerror="window.__pwned=1">');
+  await page.press('#task-input', 'Enter');
+
+  await expect(page.locator('.task-title')).toHaveText('<img src=x onerror="window.__pwned=1">');
+  expect(await page.evaluate(() => '__pwned' in window)).toBe(false);
+});
+
+test('stays quiet outside the work window', async ({ page }) => {
+  await startApp(page, { now: new Date(2026, 7, 3, 7, 0) });
+
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+});
+
+test('stays quiet at the weekend', async ({ page }) => {
+  // 2026-08-01 is a Saturday.
+  await startApp(page, { now: new Date(2026, 7, 1, 12, 0) });
+
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+});
+
+test('asks for the wrap-up after the work day ends', async ({ page }) => {
+  await startApp(page, { now: new Date(2026, 7, 3, 17, 30) });
+
+  await expect(page.locator('#card')).toHaveClass(/is-open/);
+  await expect(page.locator('#headline')).toHaveText('Wrapping up');
+});
+
+test('writes a weekly rollup when the day is wrapped up', async ({ page }) => {
+  await startApp(page, { now: new Date(2026, 7, 3, 17, 30) });
+
+  await page.fill('#task-input', 'Shipped it');
+  await page.press('#task-input', 'Enter');
+  await page.locator('.task-toggle').first().click();
+  await page.locator('.task-toggle').first().click();
+
+  await page.click('#done');
+
+  const rollup = await readVaultFile(page, '2026-W32.md');
+  expect(rollup).not.toBeNull();
+  expect(rollup).toContain('# Week 2026-W32');
+  expect(rollup).toContain('Shipped it');
+});

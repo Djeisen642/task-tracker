@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Task Tracker</title>
+    <link rel="icon" href="data:," />
+    <!--
+      Linked rather than imported from main.ts on purpose: a JS `import` of CSS
+      injects a <style> tag in dev, which the app's `style-src 'self'` CSP
+      blocks. That failure only appears in the desktop webview, never in
+      `npm run dev` in a browser.
+    -->
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <!--
+      The window is transparent and frameless; this card is the only thing that
+      paints. It slides in from the LEFT edge — the bottom-right corner belongs
+      to noticeable-calendar-alert, and two utilities fighting over one corner is
+      how you end up ignoring both.
+    -->
+    <main id="card" class="card" aria-live="polite">
+      <header class="card-head">
+        <div class="brand" aria-hidden="true">
+          <span class="brand-dot"></span>
+        </div>
+        <div class="head-text">
+          <h1 id="headline" class="headline">Quick check-in</h1>
+          <p id="subhead" class="subhead"></p>
+        </div>
+        <button id="snooze" class="icon-button" type="button" title="Snooze (Esc)">Snooze</button>
+      </header>
+
+      <section class="tasks" aria-labelledby="tasks-label">
+        <h2 id="tasks-label" class="section-label">Tasks</h2>
+        <ul id="task-list" class="task-list"></ul>
+        <p id="empty-state" class="empty-state" hidden>Nothing yet — add your first task below.</p>
+      </section>
+
+      <form id="task-form" class="entry" autocomplete="off">
+        <input
+          id="task-input"
+          class="entry-input"
+          type="text"
+          placeholder="Add a task…"
+          aria-label="Add a task"
+          maxlength="200"
+        />
+        <button class="entry-button" type="submit" title="Add task">Add</button>
+      </form>
+
+      <form id="note-form" class="entry" autocomplete="off">
+        <input
+          id="note-input"
+          class="entry-input"
+          type="text"
+          placeholder="Note a thought… @alice #kudos"
+          aria-label="Add a note"
+          maxlength="500"
+        />
+        <button class="entry-button" type="submit" title="Add note">Note</button>
+      </form>
+
+      <footer class="card-foot">
+        <button id="done" class="primary-button" type="button">Done</button>
+        <button id="copy-standup" class="ghost-button" type="button">Copy standup</button>
+        <span id="status" class="status" role="status"></span>
+      </footer>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+  role="img" aria-label="Task Tracker">
+  <title>Task Tracker (small)</title>
+  <desc>The same mark, redrawn for 16–32px: fatter strokes, no fine detail.</desc>
+
+  <!--
+    Hand-tuned for the tray and the taskbar. Downscaling the full-detail master
+    to 32px turns a 34px stroke into roughly two pixels and the dial gap into
+    mush, so this variant fattens every stroke, closes the dial, drops the inner
+    highlight, and enlarges the check until it nearly fills the ring.
+
+    Keep it in sync with icon.svg when the design changes — it is the same
+    icon, simplified, not a different one.
+  -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2b3555" />
+      <stop offset="1" stop-color="#12141b" />
+    </linearGradient>
+
+    <linearGradient id="dial" x1="110" y1="100" x2="402" y2="392" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#93b3ff" />
+      <stop offset="1" stop-color="#4f7cf0" />
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="114" fill="url(#tile)" />
+
+  <!-- Fatter, fully closed dial: a dash gap this small vanishes at 16px. -->
+  <circle cx="256" cy="268" r="140" fill="none" stroke="url(#dial)" stroke-width="56" />
+
+  <!-- Hour pip, enlarged so it survives as a distinct blob at 16px. -->
+  <circle cx="256" cy="128" r="40" fill="#f5c451" />
+
+  <!--
+    The separating underlay is only just wider than the check itself. At 118 it
+    swallowed most of the dial's interior and the mark read as a black blob with
+    a green scratch in it.
+  -->
+  <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M178 274 L236 332 L342 198" stroke="#12141b" stroke-width="92" />
+    <path d="M178 274 L236 332 L342 198" stroke="#5ecf8d" stroke-width="62" />
+  </g>
+</svg>
