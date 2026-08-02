@@ -22,7 +22,7 @@ describe('parseSettings', () => {
       vaultDir: 'C:\\vault',
       hourlyEnabled: false,
       snoozeMinutes: 20,
-      includeWeekends: true,
+      workDays: [2, 3, 4, 5, 6],
     });
     expect(settings).toEqual({
       workStart: '08:30',
@@ -30,7 +30,7 @@ describe('parseSettings', () => {
       vaultDir: 'C:\\vault',
       hourlyEnabled: false,
       snoozeMinutes: 20,
-      includeWeekends: true,
+      workDays: [2, 3, 4, 5, 6],
     });
   });
 
@@ -78,6 +78,48 @@ describe('parseSettings', () => {
     expect(
       parseSettings({ workStart: '18:00', workEnd: '09:00', snoozeMinutes: 5 }).snoozeMinutes,
     ).toBe(5);
+  });
+});
+
+describe('parseSettings — the working week', () => {
+  it('defaults to Monday through Friday', () => {
+    expect(parseSettings({}).workDays).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('sorts and de-duplicates', () => {
+    expect(parseSettings({ workDays: [5, 1, 5, 3] }).workDays).toEqual([1, 3, 5]);
+  });
+
+  it('drops values that are not real day numbers', () => {
+    expect(parseSettings({ workDays: [1, 7, -1, 2.5, 'mon', null, 3] }).workDays).toEqual([1, 3]);
+  });
+
+  it('falls back rather than accepting an empty week', () => {
+    // A week with no working days would silence the app permanently.
+    expect(parseSettings({ workDays: [] }).workDays).toEqual([1, 2, 3, 4, 5]);
+    expect(parseSettings({ workDays: ['nope'] }).workDays).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('accepts a full seven-day week', () => {
+    expect(parseSettings({ workDays: [0, 1, 2, 3, 4, 5, 6] }).workDays).toEqual([
+      0, 1, 2, 3, 4, 5, 6,
+    ]);
+  });
+
+  it('honours the superseded includeWeekends flag', () => {
+    // An existing settings.json must keep working across the upgrade.
+    expect(parseSettings({ includeWeekends: true }).workDays).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    expect(parseSettings({ includeWeekends: false }).workDays).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('prefers an explicit workDays list over the old flag', () => {
+    expect(parseSettings({ includeWeekends: true, workDays: [1, 2] }).workDays).toEqual([1, 2]);
+  });
+
+  it('does not alias the default array between calls', () => {
+    const first = parseSettings({});
+    first.workDays.push(6);
+    expect(parseSettings({}).workDays).toEqual([1, 2, 3, 4, 5]);
   });
 });
 

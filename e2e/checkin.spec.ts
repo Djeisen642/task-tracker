@@ -201,6 +201,73 @@ test('stays quiet at the weekend', async ({ page }) => {
   await expect(page.locator('#card')).not.toHaveClass(/is-open/);
 });
 
+test('prompts on a Saturday when Saturday is a working day', async ({ page }) => {
+  await startApp(page, {
+    now: new Date(2026, 7, 1, 12, 0),
+    settings: { workDays: [2, 3, 4, 5, 6] },
+  });
+
+  await expect(page.locator('#card')).toHaveClass(/is-open/);
+});
+
+test('stays quiet on a Monday that is not a working day', async ({ page }) => {
+  // A Tuesday-to-Saturday week: Monday is the weekend.
+  await startApp(page, { settings: { workDays: [2, 3, 4, 5, 6] } });
+
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+});
+
+test("Monday inherits Friday's unfinished work across the weekend", async ({ page }) => {
+  await startApp(page, {
+    files: {
+      '2026-07-31.md': dayFile('2026-07-31', [
+        { title: 'Still going on Monday', marker: '/' },
+        { title: 'Shipped on Friday', marker: 'x' },
+      ]),
+    },
+  });
+
+  await expect(page.locator('.task-title')).toHaveText(['Still going on Monday']);
+});
+
+test('heals a weekly rollup that a skipped Friday wrap-up never wrote', async ({ page }) => {
+  // Knocking off early on Friday used to lose that week's rollup permanently,
+  // because the rollup was only ever written by a day-end check-in.
+  await startApp(page, {
+    files: {
+      '2026-07-31.md': dayFile('2026-07-31', [{ title: 'Shipped on Friday', marker: 'x' }]),
+    },
+  });
+
+  expect(await readVaultFile(page, '2026-W31.md')).toBeNull();
+
+  await page.click('#done');
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+
+  const healed = await readVaultFile(page, '2026-W31.md');
+  expect(healed).not.toBeNull();
+  expect(healed).toContain('# Week 2026-W31');
+  expect(healed).toContain('Shipped on Friday');
+
+  // …and the current week is written too, not replaced by the healed one.
+  expect(await readVaultFile(page, '2026-W32.md')).toContain('# Week 2026-W32');
+});
+
+test('refreshes the rollup on an ordinary check-in, not only at day-end', async ({ page }) => {
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 14, 20),
+    files: { '2026-08-03.md': dayFile('2026-08-03', [], { lastCheckIn: '13:00' }) },
+  });
+
+  await page.fill('#task-input', 'Mid-afternoon work');
+  await page.press('#task-input', 'Enter');
+  await page.locator('.task-toggle').first().click();
+  await page.locator('.task-toggle').first().click();
+  await page.click('#done');
+
+  expect(await readVaultFile(page, '2026-W32.md')).toContain('Mid-afternoon work');
+});
+
 test('asks for the wrap-up after the work day ends', async ({ page }) => {
   await startApp(page, { now: new Date(2026, 7, 3, 17, 30) });
 

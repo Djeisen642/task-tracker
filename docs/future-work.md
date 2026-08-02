@@ -21,7 +21,7 @@ These ship in v0.1. The app is not usable without them.
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                                     |
 | done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                                    |
-| done   | Work start / end times, weekend suppression, hourly nudges toggleable.                                                                                    |
+| done   | Work start / end times, configurable working days (`workDays`), hourly nudges toggleable.                                                                 |
 | done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                                        |
 | done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                                   |
 | done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in.          |
@@ -42,10 +42,10 @@ These ship in v0.1. The app is not usable without them.
 
 ### Output
 
-| Status | Item                                                                |
-| ------ | ------------------------------------------------------------------- |
-| done   | Clipboard standup summary (yesterday done / today open / blockers). |
-| done   | Weekly rollup file `YYYY-Www.md`, regenerated at each day-end.      |
+| Status | Item                                                                                                                                                             |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| done   | Clipboard standup summary (yesterday done / today open / blockers).                                                                                              |
+| done   | Weekly rollup `YYYY-Www.md`, refreshed on every check-in and self-healed on the first check-in of a new week, so a skipped Friday wrap-up doesn't lose the week. |
 
 ### Shell
 
@@ -113,7 +113,10 @@ on them. That's where the compounding value is:
   (The sibling `noticeable-calendar-alert` already has a tested Google Calendar
   layer to borrow.)
 - Do-not-disturb / focus-mode respect.
-- A holiday calendar so PTO days aren't counted as missed logging.
+- A holiday calendar so PTO days aren't counted as missed logging. `workDays`
+  handles a recurring weekly pattern; one-off holidays still need their own list.
+- Offer a missed day-end wrap-up the next morning, rather than only carrying the
+  open tasks forward.
 
 ## Task model
 

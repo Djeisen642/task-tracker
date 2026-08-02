@@ -445,7 +445,7 @@ class CheckInController {
     this.save();
     await this.writes;
 
-    if (slot.kind === 'day-end') await this.writeWeeklyRollup(slot);
+    await this.refreshRollups(slot);
 
     this.state = markHandled(slot);
     await this.dismiss();
@@ -470,17 +470,41 @@ class CheckInController {
   }
 
   /**
-   * Regenerate the rollup for the week containing `slot`.
+   * Keep the weekly rollups current, and heal any the week boundary skipped.
    *
-   * Written at day-end rather than on a Friday-only schedule: a week you stopped
-   * logging on Wednesday still deserves a rollup, and rewriting the same file
-   * each evening keeps it current without any "is it Friday?" branch.
+   * The rollup used to be written only at `day-end`, which quietly lost a whole
+   * week whenever the last working day didn't get a wrap-up — knock off early on
+   * a Friday and that week produced no rollup at all, forever. Since the rollups
+   * are what make a year of day files reviewable, a silently missing week is the
+   * expensive kind of gap.
+   *
+   * So: refresh the current week on every check-in (it is derived data and cheap
+   * to rebuild), and on the first check-in of a day, also rebuild the previous
+   * logged week if that day belongs to a different week. That makes Monday
+   * morning repair the Friday nobody closed.
    */
-  private async writeWeeklyRollup(slot: CheckInSlot): Promise<void> {
-    const name = weekFileName(slot.date);
+  private async refreshRollups(slot: CheckInSlot): Promise<void> {
+    await this.writeRollupForWeekOf(slot.date);
+
+    if (slot.kind !== 'day-start') return;
+
+    try {
+      const previous = previousDayKey(await listDayKeys(this.vault), slot.date);
+      if (previous === null) return;
+      if (weekFileName(previous) === weekFileName(slot.date)) return;
+
+      await this.writeRollupForWeekOf(previous);
+    } catch (error) {
+      console.warn('Could not heal the previous weekly rollup:', describeError(error));
+    }
+  }
+
+  /** Regenerate the rollup file for the ISO week containing `date`. */
+  private async writeRollupForWeekOf(date: string): Promise<void> {
+    const name = weekFileName(date);
     if (name === null) return;
 
-    const slotDate = fromDateKey(slot.date);
+    const slotDate = fromDateKey(date);
     if (slotDate === null) return;
 
     try {

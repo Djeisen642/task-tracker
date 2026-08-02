@@ -63,10 +63,16 @@ function slotKey(date: DateKey, minutes: number): string {
   return `${date}T${hours}:${mins}`;
 }
 
-/** `true` on Saturday or Sunday. */
-export function isWeekend(date: Date): boolean {
-  const day = date.getDay();
-  return day === 0 || day === 6;
+/**
+ * `true` when `date` falls on one of the user's working days.
+ *
+ * Which days those are is configuration, not a constant: "the weekend" is
+ * Saturday and Sunday by default but is Friday and Saturday in much of the
+ * world, and plenty of people work a four-day week or a Tuesday-to-Saturday
+ * shift.
+ */
+export function isWorkingDay(date: Date, settings: Settings): boolean {
+  return settings.workDays.includes(date.getDay());
 }
 
 /**
@@ -76,7 +82,7 @@ export function isWeekend(date: Date): boolean {
  * missed slots coalesce instead of queueing.
  */
 export function currentSlot(now: Date, settings: Settings): CheckInSlot | null {
-  if (!settings.includeWeekends && isWeekend(now)) return null;
+  if (!isWorkingDay(now, settings)) return null;
 
   const start = parseClock(settings.workStart);
   const end = parseClock(settings.workEnd);
