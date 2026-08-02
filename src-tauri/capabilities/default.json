@@ -1,0 +1,18 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Least-privilege permissions for the check-in window: only the plugin commands the JS bridge actually invokes. Vault I/O, tray updates and window positioning go through app-defined commands in src/vault.rs and src/lib.rs, which do not pass through the capability system in Tauri v2.",
+  "windows": ["checkin"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-set-focus",
+    "core:event:allow-listen",
+    "dialog:allow-message",
+    "clipboard-manager:allow-write-text",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
+  ]
+}
