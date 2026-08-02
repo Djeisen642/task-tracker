@@ -45,7 +45,7 @@ export async function startApp(page: Page, options: SeedOptions = {}): Promise<v
     vaultDir: '',
     hourlyEnabled: true,
     snoozeMinutes: 10,
-    includeWeekends: false,
+    workDays: [1, 2, 3, 4, 5],
     ...options.settings,
   };
 

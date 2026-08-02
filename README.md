@@ -74,14 +74,14 @@ npm run tauri dev    # the real desktop app (needs the Rust toolchain)
 
 Settings live in `settings.json` in the app config directory:
 
-| Setting           | Default   | What it does                                       |
-| ----------------- | --------- | -------------------------------------------------- |
-| `workStart`       | `09:00`   | When the day-start prompt fires.                   |
-| `workEnd`         | `17:00`   | When the wrap-up prompt fires.                     |
-| `vaultDir`        | (default) | Vault folder; empty means `Documents/TaskTracker`. |
-| `hourlyEnabled`   | `true`    | Hourly nudges between start and end.               |
-| `snoozeMinutes`   | `10`      | How long Esc / Snooze defers a check-in.           |
-| `includeWeekends` | `false`   | Prompt on Saturday and Sunday too.                 |
+| Setting         | Default       | What it does                                            |
+| --------------- | ------------- | ------------------------------------------------------- |
+| `workStart`     | `09:00`       | When the day-start prompt fires.                        |
+| `workEnd`       | `17:00`       | When the wrap-up prompt fires.                          |
+| `vaultDir`      | (default)     | Vault folder; empty means `Documents/TaskTracker`.      |
+| `hourlyEnabled` | `true`        | Hourly nudges between start and end.                    |
+| `snoozeMinutes` | `10`          | How long Esc / Snooze defers a check-in.                |
+| `workDays`      | `[1,2,3,4,5]` | Which days to prompt on, `0` = Sunday … `6` = Saturday. |
 
 > There is no settings UI yet — editing that file by hand is currently the only
 > way to change your hours. It's the largest remaining gap before v0.1; see
@@ -100,6 +100,14 @@ immediately correct for the same reason.
 
 Esc snoozes. "Done" marks the slot handled and gets out of the way until the next
 hour.
+
+Non-working days are silent. Which days those are is `workDays`, not a
+weekend flag — a Tuesday-to-Saturday shift or a four-day week is just a different
+list. Monday still inherits Friday's unfinished work: carry-over looks back up to
+four calendar days, which spans a weekend and a long weekend.
+
+You can always check in outside the schedule from the tray, including on a day
+off.
 
 ## Tray menu
 
@@ -140,7 +148,7 @@ runs format, lint, typecheck and tests; `npm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (258 unit tests plus 20 end-to-end
+Pre-v0.1. The web layer is built and tested (274 unit tests plus 25 end-to-end
 tests driving the real card in a browser), and the Rust layer compiles clean —
 `cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
 all pass.

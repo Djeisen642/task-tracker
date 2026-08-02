@@ -109,6 +109,14 @@ docs/
   booting at 11:30 — machine off at 09:00, or a late start — serves a routine
   nudge and the user never sees their day or what carried over. The upgrade keeps
   the _current_ slot's key, so finishing it doesn't leave 11:00 outstanding.
+- **The working week is a list, not a weekend flag.** `settings.workDays` holds
+  `Date.getDay()` numbers, because "the weekend" is Friday/Saturday in much of
+  the world and plenty of people work four days or Tuesday-to-Saturday. Parsing
+  still understands the superseded `includeWeekends` boolean.
+- **Weekly rollups are derived and self-healing.** They refresh on every check-in
+  and, on the first check-in of a new week, rebuild the previous week too. Written
+  only at `day-end`, a week whose last working day never got a wrap-up produced no
+  rollup at all — and the rollups are what make a year of day files reviewable.
 - **Scheduler state is persisted in the day file, not in memory.** The handled
   slot is written as `last_check_in` in frontmatter and restored on launch. The
   app must survive reboots, Windows updates and its own crashes mid-workday;

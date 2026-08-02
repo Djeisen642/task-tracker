@@ -6,7 +6,7 @@ import {
   dueCheckIn,
   hasHandledToday,
   INITIAL_CHECK_IN_STATE,
-  isWeekend,
+  isWorkingDay,
   markHandled,
   onDemandSlot,
   restoreCheckInState,
@@ -23,11 +23,25 @@ function at(hours: number, minutes = 0): Date {
 
 const SETTINGS: Settings = { ...DEFAULT_SETTINGS, workStart: '09:00', workEnd: '17:00' };
 
-describe('isWeekend', () => {
-  it('identifies Saturday and Sunday', () => {
-    expect(isWeekend(new Date(2026, 7, 1))).toBe(true);
-    expect(isWeekend(new Date(2026, 7, 2))).toBe(true);
-    expect(isWeekend(new Date(2026, 7, 3))).toBe(false);
+describe('isWorkingDay', () => {
+  it('treats Monday to Friday as working days by default', () => {
+    // 2026-08-01 Sat, 08-02 Sun, 08-03 Mon.
+    expect(isWorkingDay(new Date(2026, 7, 1), SETTINGS)).toBe(false);
+    expect(isWorkingDay(new Date(2026, 7, 2), SETTINGS)).toBe(false);
+    expect(isWorkingDay(new Date(2026, 7, 3), SETTINGS)).toBe(true);
+  });
+
+  it('follows a shifted week rather than assuming Sat/Sun', () => {
+    // Tuesday-to-Saturday: Sunday and Monday are the weekend.
+    const shifted: Settings = { ...SETTINGS, workDays: [2, 3, 4, 5, 6] };
+    expect(isWorkingDay(new Date(2026, 7, 1), shifted)).toBe(true); // Saturday
+    expect(isWorkingDay(new Date(2026, 7, 3), shifted)).toBe(false); // Monday
+  });
+
+  it('supports a four-day week', () => {
+    const short: Settings = { ...SETTINGS, workDays: [1, 2, 3, 4] };
+    expect(isWorkingDay(new Date(2026, 7, 6), short)).toBe(true); // Thursday
+    expect(isWorkingDay(new Date(2026, 7, 7), short)).toBe(false); // Friday
   });
 });
 
@@ -73,9 +87,9 @@ describe('currentSlot', () => {
     expect(currentSlot(new Date(2026, 7, 1, 12, 0), SETTINGS)).toBeNull();
   });
 
-  it('includes weekends when configured to', () => {
-    const weekends: Settings = { ...SETTINGS, includeWeekends: true };
-    expect(currentSlot(new Date(2026, 7, 1, 12, 0), weekends)?.kind).toBe('hourly');
+  it('prompts at the weekend when those days are working days', () => {
+    const everyDay: Settings = { ...SETTINGS, workDays: [0, 1, 2, 3, 4, 5, 6] };
+    expect(currentSlot(new Date(2026, 7, 1, 12, 0), everyDay)?.kind).toBe('hourly');
   });
 
   it('is null when the work window is inverted', () => {
