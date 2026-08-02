@@ -6,3 +6,6 @@ src-tauri/gen/
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
+e2e/.results/
+playwright-report/
+docs/screenshots/

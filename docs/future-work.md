@@ -53,6 +53,7 @@ These ship in v0.1. The app is not usable without them.
 | ------- | ----------------------------------------------------------------------------------------------------------------------- |
 | done    | Tray icon and menu: status line, check in now, copy standup, open vault, quit.                                          |
 | done    | Least-privilege capabilities — only the plugin commands JS invokes.                                                     |
+| done    | End-to-end suite driving the real card in a browser, plus screenshot capture and a `verify-app` skill.                  |
 | partial | Launch at login: the bridge is wired, but nothing toggles it yet (needs the settings UI below).                         |
 | todo    | **A settings UI.** Work hours are only editable by hand-editing `settings.json`. This is the largest remaining MVP gap. |
 | done    | App icons generated from the SVG master and committed (`generate_context!` embeds them at compile time).                |

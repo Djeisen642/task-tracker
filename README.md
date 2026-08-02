@@ -62,6 +62,8 @@ questions. Point Claude at the folder and ask:
 Hand edits are preserved — sections and frontmatter keys the app doesn't own
 survive its writes untouched, so you and an agent can both write to a day file.
 
+![The day-start check-in](docs/screenshots/day-start.png)
+
 ## Getting started
 
 ```bash
@@ -108,6 +110,26 @@ hour.
 - **Open vault folder**
 - **Quit**
 
+## Verifying it works
+
+```bash
+npm run check    # format, lint, typecheck, unit tests
+npm run build    # it bundles
+npm run e2e      # it actually runs — the real card, driven in a browser
+```
+
+The end-to-end suite drives the real check-in card: adding tasks, cycling
+statuses, finishing a check-in and asserting the resulting Markdown. That's
+possible because the frontend is framework-free and browser-runnable, so the
+browser exercises the same controller, scheduler and serializer as the desktop
+build.
+
+`npm run e2e -- capture` regenerates `docs/screenshots/`. Look at them — a
+screenshot has already caught a wrong prompt that no assertion did.
+
+What e2e cannot cover: the tray, window positioning, transparency,
+launch-at-login, and Windows focus behavior. Those need real hardware.
+
 ## Stack
 
 Tauri v2, vanilla TypeScript, Vite. No UI framework, on purpose — the app runs
@@ -118,9 +140,10 @@ runs format, lint, typecheck and tests; `npm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (223 unit tests), and the Rust layer
-compiles clean — `cargo check`, `cargo test`, `cargo clippy -D warnings` and
-`cargo fmt --check` all pass.
+Pre-v0.1. The web layer is built and tested (258 unit tests plus 20 end-to-end
+tests driving the real card in a browser), and the Rust layer compiles clean —
+`cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
+all pass.
 
 What has **never run** is the app itself on a Windows desktop. See "Known
 unknowns" in [`docs/future-work.md`](docs/future-work.md) for what needs

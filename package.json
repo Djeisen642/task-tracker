@@ -23,7 +23,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
@@ -34,6 +37,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.10",

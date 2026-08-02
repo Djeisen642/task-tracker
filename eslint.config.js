@@ -45,9 +45,18 @@ export default tseslint.config(
 
   // Tooling configs run in Node.
   {
-    files: ['*.config.ts', 'vite.config.ts', 'vitest.config.ts'],
+    files: ['*.config.ts', 'vite.config.ts', 'vitest.config.ts', 'playwright.config.ts'],
     languageOptions: {
       globals: { ...globals.node },
+    },
+  },
+
+  // End-to-end specs run in Node (the Playwright runner) but their `evaluate`
+  // callbacks execute in the browser, so both sets of globals are in scope.
+  {
+    files: ['e2e/**/*.ts'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
     },
   },
 
