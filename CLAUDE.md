@@ -154,6 +154,25 @@ docs/
 - **Motion is GPU-only.** Animate `transform`/`opacity` exclusively; never
   animate layout properties. Respect `prefers-reduced-motion`.
 
+### Borrowed scars
+
+`noticeable-calendar-alert` is the sibling project and paid for these already.
+Each one is applied here; don't undo them.
+
+- **Two icon masters.** Downscaling detailed art to 32px produces a smudge in the
+  tray. `icon-small.svg` exists for ≤32px. Also: `.ico`/`.icns` must be listed in
+  `bundle.icon` or Windows/macOS bundling fails, and `tauri icon` overwrites the
+  hand-tuned sizes every time it runs. See `src-tauri/icons/README.md`.
+- **A status line refreshed only on events is a stale snapshot.** The tray text
+  re-renders on the scheduler tick and pushes only when it changed.
+- **A flag set after an `await` is not a guard.** `presenting` is raised
+  synchronously before the vault read, because `visible` is set after it — the
+  sibling shipped a double-present race of exactly this shape.
+- **Size the window to its content.** Theirs was 420×600 with content in the
+  bottom 250px; ours is 420×470 for the same reason.
+- **Don't assume an input is sorted.** Their `selectNextEvent` relied on
+  ascending order that no signature promised. Ours re-derive order themselves.
+
 ## Commands
 
 | Command                | Purpose                                         |

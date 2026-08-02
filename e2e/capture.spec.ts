@@ -17,7 +17,7 @@ import { startApp, dayFile } from './harness.ts';
 const SHOTS = 'docs/screenshots';
 
 /** Match the real Tauri window so the shots show true proportions. */
-test.use({ viewport: { width: 420, height: 560 } });
+test.use({ viewport: { width: 420, height: 470 } });
 
 /**
  * The entrance transition is CSS, driven by the compositor rather than by the

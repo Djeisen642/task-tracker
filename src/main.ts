@@ -41,6 +41,7 @@ import {
   summarizeTasks,
   type Task,
 } from './lib/tasks.ts';
+import { formatTrayStatus } from './lib/tray.ts';
 import {
   copyToClipboard,
   createVault,
@@ -120,6 +121,10 @@ class CheckInController {
   private slot: CheckInSlot | null = null;
   /** `true` while the card is on screen. */
   private visible = false;
+  /** `true` between the decision to present and the card actually appearing. */
+  private presenting = false;
+  /** Last text pushed to the tray, so identical updates aren't re-sent. */
+  private lastTrayStatus: string | null = null;
   /**
    * Serializes vault writes. Every save appends to this chain rather than
    * racing, so a fast "add task, add task, Done" can't produce interleaved
@@ -240,6 +245,9 @@ class CheckInController {
   private async tick(): Promise<void> {
     if (this.visible) return;
 
+    // Keep the tray honest even on the many ticks that don't prompt.
+    await this.refreshTrayStatus();
+
     const now = new Date();
     const slot = dueCheckIn(now, this.settings, this.state);
     if (slot === null) return;
@@ -247,8 +255,20 @@ class CheckInController {
     await this.present(slot);
   }
 
-  /** Load the day behind `slot` and bring the card on screen. */
+  /**
+   * Load the day behind `slot` and bring the card on screen.
+   *
+   * `presenting` is raised **synchronously**, before the first `await`. The
+   * `visible` flag alone is not a sufficient guard: it is only set after the
+   * vault read resolves, so a tray "check in now" landing during that read would
+   * pass the `visible` check and present a second card over the first. The
+   * sibling calendar-alert project shipped exactly this race between its
+   * animation and poll paths before adding a mutual-exclusion flag.
+   */
   private async present(slot: CheckInSlot): Promise<void> {
+    if (this.presenting) return;
+    this.presenting = true;
+
     try {
       this.day = await openDay(
         this.vault,
@@ -262,6 +282,8 @@ class CheckInController {
       // broken vault would be worse than missing one check-in.
       this.state = markHandled(slot);
       return;
+    } finally {
+      this.presenting = false;
     }
 
     this.slot = slot;
@@ -504,20 +526,32 @@ class CheckInController {
     }
   }
 
-  /** Keep the tray menu's status line current. */
+  /**
+   * Keep the tray menu's status line current.
+   *
+   * Runs on every scheduler tick, not just at launch and after a check-in.
+   * Refreshing only on those two events left the line showing a snapshot that
+   * could be hours old — a status that looks broken rather than live, which is
+   * the same defect the sibling calendar-alert project fixed in its tray
+   * countdown.
+   *
+   * It reads from the in-memory day when that is today's, and only pushes to the
+   * tray when the rendered text actually changed, so a minute-by-minute refresh
+   * costs neither a disk read nor a redundant IPC call in the common case.
+   */
   private async refreshTrayStatus(): Promise<void> {
     try {
       const today = toDateKey(new Date());
-      const day = await readDay(this.vault, today, this.settings.workStart, this.settings.workEnd);
-      if (day === null) {
-        await setTrayStatus('No entries today');
-        return;
-      }
+      const day =
+        this.day?.date === today
+          ? this.day
+          : await readDay(this.vault, today, this.settings.workStart, this.settings.workEnd);
 
-      const summary = summarizeTasks(day.tasks);
-      await setTrayStatus(
-        `${String(summary.completed)} done · ${String(summary.open)} open · ${String(day.notes.length)} notes`,
-      );
+      const text = formatTrayStatus(day);
+      if (text === this.lastTrayStatus) return;
+
+      this.lastTrayStatus = text;
+      await setTrayStatus(text);
     } catch {
       // The tray line is cosmetic; a failure here is not worth a dialog.
     }
