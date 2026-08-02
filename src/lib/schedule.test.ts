@@ -4,6 +4,7 @@ import {
   currentSlot,
   describeCheckIn,
   dueCheckIn,
+  hasHandledToday,
   INITIAL_CHECK_IN_STATE,
   isWeekend,
   markHandled,
@@ -94,8 +95,15 @@ describe('currentSlot', () => {
 });
 
 describe('dueCheckIn', () => {
+  /**
+   * State for a day whose opener is already done, so these cases exercise the
+   * ordinary hourly path. Without it every fresh-state case would be upgraded to
+   * a day-start — see "the first check-in of a day is always the day's opener".
+   */
+  const dayOpened: CheckInState = markHandled(currentSlot(at(9, 0), SETTINGS)!);
+
   it('is due when the slot has not been handled', () => {
-    expect(dueCheckIn(at(12, 0), SETTINGS, INITIAL_CHECK_IN_STATE)?.kind).toBe('hourly');
+    expect(dueCheckIn(at(12, 0), SETTINGS, dayOpened)?.kind).toBe('hourly');
   });
 
   it('is not due once the slot is handled', () => {
@@ -118,16 +126,16 @@ describe('dueCheckIn', () => {
   });
 
   it('is suppressed while snoozed and returns when the snooze lapses', () => {
-    const snoozed = snooze(INITIAL_CHECK_IN_STATE, at(12, 0), SETTINGS);
+    const snoozed = snooze(dayOpened, at(12, 0), SETTINGS);
     expect(dueCheckIn(at(12, 5), SETTINGS, snoozed)).toBeNull();
     expect(dueCheckIn(at(12, 11), SETTINGS, snoozed)?.kind).toBe('hourly');
   });
 
   it('still fires day-start and day-end when hourly nudges are off', () => {
     const quiet: Settings = { ...SETTINGS, hourlyEnabled: false };
-    expect(dueCheckIn(at(12, 0), quiet, INITIAL_CHECK_IN_STATE)).toBeNull();
+    expect(dueCheckIn(at(12, 0), quiet, dayOpened)).toBeNull();
     expect(dueCheckIn(at(9, 0), quiet, INITIAL_CHECK_IN_STATE)?.kind).toBe('day-start');
-    expect(dueCheckIn(at(17, 0), quiet, INITIAL_CHECK_IN_STATE)?.kind).toBe('day-end');
+    expect(dueCheckIn(at(17, 0), quiet, dayOpened)?.kind).toBe('day-end');
   });
 
   it('leaves the user alone outside the work window', () => {
@@ -148,6 +156,88 @@ describe('dueCheckIn', () => {
   it("does not resurrect yesterday's handled slot today", () => {
     const yesterday: CheckInState = { handledSlotKey: '2026-08-02T14:00', snoozedUntil: null };
     expect(dueCheckIn(at(14, 0), SETTINGS, yesterday)?.key).toBe('2026-08-03T14:00');
+  });
+});
+
+describe("the first check-in of a day is always the day's opener", () => {
+  it('shows day-start when launching mid-morning with nothing logged', () => {
+    // Machine was off at 09:00; booting at 11:30 must still show you your day,
+    // not a routine hourly nudge.
+    const slot = dueCheckIn(at(11, 30), SETTINGS, INITIAL_CHECK_IN_STATE);
+    expect(slot?.kind).toBe('day-start');
+  });
+
+  it('keys the upgraded slot to the current hour, not to work start', () => {
+    // Keeping the 09:00 key would leave 11:00 outstanding and fire again a
+    // minute later.
+    const slot = dueCheckIn(at(11, 30), SETTINGS, INITIAL_CHECK_IN_STATE)!;
+    expect(slot.key).toBe('2026-08-03T11:00');
+    expect(dueCheckIn(at(11, 31), SETTINGS, markHandled(slot))).toBeNull();
+  });
+
+  it('returns to ordinary hourly nudges once the day has been opened', () => {
+    const opener = dueCheckIn(at(11, 30), SETTINGS, INITIAL_CHECK_IN_STATE)!;
+    const state = markHandled(opener);
+    expect(dueCheckIn(at(12, 0), SETTINGS, state)?.kind).toBe('hourly');
+  });
+
+  it('does not upgrade when the day was already opened', () => {
+    const state = markHandled(currentSlot(at(9, 0), SETTINGS)!);
+    expect(dueCheckIn(at(11, 30), SETTINGS, state)?.kind).toBe('hourly');
+  });
+
+  it('still shows day-start after a snoozed opener lapses', () => {
+    // Snoozing doesn't mean you've seen your day.
+    const snoozed = snooze(INITIAL_CHECK_IN_STATE, at(11, 30), SETTINGS);
+    expect(dueCheckIn(at(11, 45), SETTINGS, snoozed)?.kind).toBe('day-start');
+  });
+
+  it("treats yesterday's record as a fresh day", () => {
+    const yesterday: CheckInState = { handledSlotKey: '2026-08-02T16:00', snoozedUntil: null };
+    expect(dueCheckIn(at(11, 30), SETTINGS, yesterday)?.kind).toBe('day-start');
+  });
+
+  it('survives a reboot mid-morning without repeating the opener', () => {
+    const opener = dueCheckIn(at(11, 30), SETTINGS, INITIAL_CHECK_IN_STATE)!;
+    const afterReboot = restoreCheckInState(opener.date, slotClock(opener));
+    expect(dueCheckIn(at(11, 40), SETTINGS, afterReboot)).toBeNull();
+    expect(dueCheckIn(at(12, 0), SETTINGS, afterReboot)?.kind).toBe('hourly');
+  });
+
+  it('opens the day even when hourly nudges are switched off', () => {
+    const quiet: Settings = { ...SETTINGS, hourlyEnabled: false };
+    expect(dueCheckIn(at(11, 30), quiet, INITIAL_CHECK_IN_STATE)?.kind).toBe('day-start');
+  });
+
+  it('prefers the wrap-up past the end of the day, even if nothing was logged', () => {
+    // At 18:00 on an unlogged day, "what did you get done, and what's tomorrow?"
+    // beats "here's your day".
+    expect(dueCheckIn(at(18, 0), SETTINGS, INITIAL_CHECK_IN_STATE)?.kind).toBe('day-end');
+  });
+
+  it('leaves the pre-work window alone', () => {
+    expect(dueCheckIn(at(7, 0), SETTINGS, INITIAL_CHECK_IN_STATE)).toBeNull();
+  });
+});
+
+describe('hasHandledToday', () => {
+  it('is false before anything is handled', () => {
+    expect(hasHandledToday(INITIAL_CHECK_IN_STATE, '2026-08-03')).toBe(false);
+  });
+
+  it('is true for a slot handled on that date', () => {
+    const state = markHandled(currentSlot(at(12, 0), SETTINGS)!);
+    expect(hasHandledToday(state, '2026-08-03')).toBe(true);
+  });
+
+  it('is false for a slot handled on another date', () => {
+    const state = markHandled(currentSlot(at(12, 0), SETTINGS)!);
+    expect(hasHandledToday(state, '2026-08-04')).toBe(false);
+  });
+
+  it('does not match on a date that merely shares a prefix', () => {
+    const state: CheckInState = { handledSlotKey: '2026-08-30T12:00', snoozedUntil: null };
+    expect(hasHandledToday(state, '2026-08-3')).toBe(false);
   });
 });
 

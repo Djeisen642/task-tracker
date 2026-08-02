@@ -91,6 +91,12 @@ docs/
   15:30, and you either get nothing or four stacked prompts. Slots collapse a
   missed stretch to exactly one prompt and make a mid-day launch correct
   immediately. Never replace this with a plain timer.
+- **The first check-in of a day is always a `day-start`, whatever the hour.**
+  `currentSlot` picks a kind from the clock; `dueCheckIn` upgrades an `hourly`
+  slot to `day-start` when nothing has been handled that date yet. Otherwise
+  booting at 11:30 — machine off at 09:00, or a late start — serves a routine
+  nudge and the user never sees their day or what carried over. The upgrade keeps
+  the _current_ slot's key, so finishing it doesn't leave 11:00 outstanding.
 - **Scheduler state is persisted in the day file, not in memory.** The handled
   slot is written as `last_check_in` in frontmatter and restored on launch. The
   app must survive reboots, Windows updates and its own crashes mid-workday;

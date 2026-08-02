@@ -104,15 +104,41 @@ export function currentSlot(now: Date, settings: Settings): CheckInSlot | null {
   return { kind: 'hourly', key: slotKey(date, slotMinutes), date, minutes: slotMinutes };
 }
 
+/** `true` when some check-in has already been handled on `date`. */
+export function hasHandledToday(state: CheckInState, date: DateKey): boolean {
+  return state.handledSlotKey?.startsWith(`${date}T`) === true;
+}
+
 /**
  * The check-in to show right now, or `null` for "leave the user alone".
  *
  * A slot is due when it is current, not already handled, and not snoozed.
+ *
+ * **The first check-in of a day is always a `day-start`,** whatever the hour.
+ * `currentSlot` picks the kind from the clock alone, so booting at 11:30 — the
+ * machine was off at 09:00, or you started late — would otherwise serve a
+ * routine hourly nudge and you'd never be shown your day or what carried over.
+ * Having seen your day is a question about state, not about what time it is.
+ *
+ * The upgrade changes the slot's *kind* but keeps the current slot's *key*, so
+ * finishing a day-start surfaced at 11:30 marks the 11:00 slot handled. Keeping
+ * the 09:00 key instead would leave 11:00 outstanding and fire a second prompt a
+ * minute later.
  */
 export function dueCheckIn(now: Date, settings: Settings, state: CheckInState): CheckInSlot | null {
-  const slot = currentSlot(now, settings);
-  if (slot === null) return null;
+  const current = currentSlot(now, settings);
+  if (current === null) return null;
+
+  // Only `hourly` is upgraded: past the work end the wrap-up is the more useful
+  // prompt, even on a day where nothing was ever logged.
+  const slot: CheckInSlot =
+    current.kind === 'hourly' && !hasHandledToday(state, current.date)
+      ? { ...current, kind: 'day-start' }
+      : current;
+
   if (state.handledSlotKey === slot.key) return null;
+  // Checked after the upgrade: with hourly nudges switched off you still get
+  // your day once, because day-start and day-end always fire.
   if (slot.kind === 'hourly' && !settings.hourlyEnabled) return null;
   if (state.snoozedUntil !== null && now.getTime() < state.snoozedUntil) return null;
 
