@@ -42,6 +42,7 @@ are preserved — but changes to this file will be overwritten.
 date: 2026-08-02
 work_start: 09:00
 work_end: 17:00
+last_check_in: 14:00
 ---
 
 # Sunday, 2 August 2026
@@ -57,6 +58,10 @@ work_end: 17:00
 - 10:15 — @alice unblocked the release single-handedly #kudos
 - 14:00 — Deferred the cache work until the RFC lands #decision
 \`\`\`
+
+\`last_check_in\` is bookkeeping: the time of the last check-in the app recorded
+that day, used so a restart doesn't re-prompt. It is not a claim about when work
+happened — read the notes for that.
 
 ### Task status markers
 

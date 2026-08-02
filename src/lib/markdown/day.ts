@@ -31,7 +31,7 @@
  * ```
  */
 
-import { describeDate, fromDateKey, type Clock, type DateKey } from '../dates.ts';
+import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
 import type { Task, TaskStatus } from '../tasks.ts';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
 
@@ -51,6 +51,18 @@ export interface DayDocument {
   date: DateKey;
   workStart: Clock;
   workEnd: Clock;
+  /**
+   * The check-in slot most recently handled on this day, as local `HH:MM`.
+   *
+   * This is the scheduler's memory, and it lives in the day file rather than in
+   * app state on purpose: the machine can be rebooted, the app quit, or the
+   * process killed at any point in the workday. Without it, relaunching at 14:30
+   * re-prompts for the 14:00 slot you already completed — and an app that nags
+   * you for work you've done is one you stop running.
+   *
+   * `undefined` means no check-in has been handled yet today.
+   */
+  lastCheckIn?: Clock;
   tasks: Task[];
   notes: Note[];
   /** Frontmatter keys we don't own, kept so hand-added keys survive a write. */
@@ -81,7 +93,7 @@ const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 
 /** Owned frontmatter keys, in the order they're written. */
-const OWNED_FIELDS = ['date', 'work_start', 'work_end'];
+const OWNED_FIELDS = ['date', 'work_start', 'work_end', 'last_check_in'];
 
 interface Section {
   heading: string;
@@ -179,10 +191,17 @@ export function parseDay(
     }
   }
 
+  // A malformed hand-edited value is dropped rather than trusted: a bad slot key
+  // would suppress check-ins for the rest of the day, which fails silently.
+  const lastCheckIn = fields.last_check_in;
+  const validLastCheckIn =
+    lastCheckIn !== undefined && parseClock(lastCheckIn) !== null ? lastCheckIn : undefined;
+
   return {
     date: fields.date ?? fallback.date,
     workStart: fields.work_start ?? fallback.workStart,
     workEnd: fields.work_end ?? fallback.workEnd,
+    ...(validLastCheckIn === undefined ? {} : { lastCheckIn: validLastCheckIn }),
     tasks,
     notes,
     extraFields,
@@ -205,6 +224,7 @@ export function serializeDay(day: DayDocument): string {
     date: day.date,
     work_start: day.workStart,
     work_end: day.workEnd,
+    ...(day.lastCheckIn === undefined ? {} : { last_check_in: day.lastCheckIn }),
     ...day.extraFields,
   };
 

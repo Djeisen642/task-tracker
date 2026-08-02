@@ -91,6 +91,11 @@ docs/
   15:30, and you either get nothing or four stacked prompts. Slots collapse a
   missed stretch to exactly one prompt and make a mid-day launch correct
   immediately. Never replace this with a plain timer.
+- **Scheduler state is persisted in the day file, not in memory.** The handled
+  slot is written as `last_check_in` in frontmatter and restored on launch. The
+  app must survive reboots, Windows updates and its own crashes mid-workday;
+  without this it relaunches believing nothing was handled and re-prompts for a
+  check-in the user already completed. A snooze is deliberately _not_ restored.
 - **The Markdown is the source of truth.** Not a cache, not an export. If a
   SQLite index is ever added it must be _derived_ and rebuildable — never written
   before the Markdown. See `docs/future-work.md`.

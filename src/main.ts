@@ -25,6 +25,8 @@ import {
   INITIAL_CHECK_IN_STATE,
   markHandled,
   onDemandSlot,
+  restoreCheckInState,
+  slotClock,
   snooze,
   SCHEDULER_TICK_MS,
   type CheckInSlot,
@@ -176,6 +178,7 @@ class CheckInController {
       console.warn('Could not write the vault guide:', describeError(error));
     }
 
+    await this.restoreSchedulerState();
     await this.registerTrayHandlers();
     await this.refreshTrayStatus();
 
@@ -186,6 +189,28 @@ class CheckInController {
     // Evaluate immediately so launching mid-morning doesn't wait an hour for
     // the first tick to notice an outstanding slot.
     await this.tick();
+  }
+
+  /**
+   * Recover which check-in was last handled today, from today's day file.
+   *
+   * The scheduler's state is in-memory, and this app is expected to survive
+   * reboots, Windows updates and its own crashes mid-workday. Without this the
+   * app would relaunch believing nothing had been handled and immediately
+   * re-prompt for a slot the user already completed.
+   */
+  private async restoreSchedulerState(): Promise<void> {
+    try {
+      const today = toDateKey(new Date());
+      const day = await readDay(this.vault, today, this.settings.workStart, this.settings.workEnd);
+      if (day === null) return;
+
+      this.state = restoreCheckInState(today, day.lastCheckIn);
+    } catch (error) {
+      // Falling back to "nothing handled" costs at most one extra prompt, which
+      // is a far better failure than refusing to start.
+      console.warn('Could not restore check-in state:', describeError(error));
+    }
   }
 
   private async loadSettings(): Promise<void> {
@@ -389,6 +414,11 @@ class CheckInController {
   private async finish(): Promise<void> {
     const slot = this.slot;
     if (slot === null) return;
+
+    // Record the handled slot *in the day file* before saving, so the scheduler
+    // can recover it after a reboot. This has to happen before `save()`, which
+    // snapshots the document.
+    if (this.day !== null) this.day = { ...this.day, lastCheckIn: slotClock(slot) };
 
     this.save();
     await this.writes;

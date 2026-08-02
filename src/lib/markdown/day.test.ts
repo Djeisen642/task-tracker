@@ -95,6 +95,25 @@ describe('parseDay', () => {
     expect(round.notes).toEqual([]);
   });
 
+  it('reads the last handled check-in', () => {
+    const day = parseDay('---\ndate: 2026-08-02\nlast_check_in: 14:00\n---\n', FALLBACK);
+    expect(day.lastCheckIn).toBe('14:00');
+  });
+
+  it('leaves the check-in record undefined when absent', () => {
+    expect(parseDay(SAMPLE, FALLBACK).lastCheckIn).toBeUndefined();
+  });
+
+  it('drops a malformed check-in record rather than trusting it', () => {
+    const day = parseDay('---\ndate: 2026-08-02\nlast_check_in: lunchtime\n---\n', FALLBACK);
+    expect(day.lastCheckIn).toBeUndefined();
+  });
+
+  it('does not leak the check-in record into unowned fields', () => {
+    const day = parseDay('---\ndate: 2026-08-02\nlast_check_in: 14:00\n---\n', FALLBACK);
+    expect(day.extraFields).toEqual({});
+  });
+
   it('keeps unknown frontmatter keys', () => {
     const day = parseDay('---\ndate: 2026-08-02\nmood: focused\n---\n', FALLBACK);
     expect(day.extraFields).toEqual({ mood: 'focused' });
@@ -149,6 +168,16 @@ describe('serializeDay', () => {
     expect(output).toContain('## Retro');
     expect(output).toContain('Went well.');
     expect(parseDay(output, FALLBACK).extraSections[0]?.heading).toBe('## Retro');
+  });
+
+  it('writes the last handled check-in so it survives a restart', () => {
+    const day = { ...createDay('2026-08-02', '09:00', '17:00'), lastCheckIn: '14:00' };
+    expect(serializeDay(day)).toContain('last_check_in: 14:00');
+    expect(parseDay(serializeDay(day), FALLBACK).lastCheckIn).toBe('14:00');
+  });
+
+  it('omits the check-in key entirely when nothing has been handled', () => {
+    expect(serializeDay(createDay('2026-08-02', '09:00', '17:00'))).not.toContain('last_check_in');
   });
 
   it('preserves an unowned frontmatter key through a full round trip', () => {

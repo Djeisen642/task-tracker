@@ -20,7 +20,7 @@
  *   14:00 slot is outstanding, without waiting an hour for the first tick.
  */
 
-import { minutesSinceMidnight, parseClock, toDateKey, type DateKey } from './dates.ts';
+import { formatClock, minutesSinceMidnight, parseClock, toDateKey, type DateKey } from './dates.ts';
 import type { Settings } from './settings.ts';
 import { MS_PER_MINUTE } from './time.ts';
 
@@ -126,6 +126,31 @@ export function dueCheckIn(now: Date, settings: Settings, state: CheckInState): 
  */
 export function markHandled(slot: CheckInSlot): CheckInState {
   return { handledSlotKey: slot.key, snoozedUntil: null };
+}
+
+/** The `HH:MM` to record in a day file so a slot survives a restart. */
+export function slotClock(slot: CheckInSlot): string {
+  return formatClock(slot.minutes);
+}
+
+/**
+ * Rebuild scheduler state from what a day file recorded.
+ *
+ * Called at startup. Without it the scheduler starts every launch believing
+ * nothing has been handled today, so a reboot at 14:30 re-prompts for the 14:00
+ * check-in you already completed — the app nagging you for finished work.
+ *
+ * A snooze is deliberately *not* restored. It's a sub-hour deferral, and if the
+ * machine was off long enough to restart you are back at the keyboard now; being
+ * asked once on return is the better failure than silently swallowing a slot.
+ */
+export function restoreCheckInState(date: DateKey, lastCheckIn: string | undefined): CheckInState {
+  if (lastCheckIn === undefined) return { ...INITIAL_CHECK_IN_STATE };
+
+  const minutes = parseClock(lastCheckIn);
+  if (minutes === null) return { ...INITIAL_CHECK_IN_STATE };
+
+  return { handledSlotKey: slotKey(date, minutes), snoozedUntil: null };
 }
 
 /** Defer the current slot without handling it. */

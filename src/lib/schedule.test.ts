@@ -8,6 +8,8 @@ import {
   isWeekend,
   markHandled,
   onDemandSlot,
+  restoreCheckInState,
+  slotClock,
   snooze,
   type CheckInState,
 } from './schedule.ts';
@@ -202,6 +204,60 @@ describe('onDemandSlot', () => {
   it('handling a synthesized slot does not suppress the next workday', () => {
     const state = markHandled(onDemandSlot(at(7, 15), SETTINGS));
     expect(dueCheckIn(at(9, 0), SETTINGS, state)?.kind).toBe('day-start');
+  });
+});
+
+describe('slotClock / restoreCheckInState', () => {
+  it('round-trips a handled slot through the day file', () => {
+    const slot = currentSlot(at(14, 30), SETTINGS)!;
+    const restored = restoreCheckInState(slot.date, slotClock(slot));
+    expect(restored.handledSlotKey).toBe(slot.key);
+  });
+
+  it('does not re-prompt for a slot handled before a reboot', () => {
+    // Regression: scheduler state lived only in memory, so relaunching at 14:35
+    // re-prompted for the 14:00 check-in the user had already completed.
+    const slot = currentSlot(at(14, 0), SETTINGS)!;
+    const afterReboot = restoreCheckInState(slot.date, slotClock(slot));
+    expect(dueCheckIn(at(14, 35), SETTINGS, afterReboot)).toBeNull();
+  });
+
+  it('still lets the next slot through after a reboot', () => {
+    const slot = currentSlot(at(14, 0), SETTINGS)!;
+    const afterReboot = restoreCheckInState(slot.date, slotClock(slot));
+    expect(dueCheckIn(at(15, 0), SETTINGS, afterReboot)?.key).toBe('2026-08-03T15:00');
+  });
+
+  it('restores the day-start slot', () => {
+    const slot = currentSlot(at(9, 0), SETTINGS)!;
+    expect(restoreCheckInState(slot.date, slotClock(slot)).handledSlotKey).toBe('2026-08-03T09:00');
+  });
+
+  it('restores the day-end slot so the evening stays quiet', () => {
+    const slot = currentSlot(at(17, 0), SETTINGS)!;
+    const afterReboot = restoreCheckInState(slot.date, slotClock(slot));
+    expect(dueCheckIn(at(21, 0), SETTINGS, afterReboot)).toBeNull();
+  });
+
+  it('treats a day file with no record as nothing handled', () => {
+    expect(restoreCheckInState('2026-08-03', undefined)).toEqual(INITIAL_CHECK_IN_STATE);
+  });
+
+  it('ignores a malformed hand-edited value rather than trusting it', () => {
+    // Trusting garbage would silently suppress every check-in for the rest of
+    // the day, which is the worse failure.
+    expect(restoreCheckInState('2026-08-03', 'lunchtime')).toEqual(INITIAL_CHECK_IN_STATE);
+    expect(restoreCheckInState('2026-08-03', '25:99')).toEqual(INITIAL_CHECK_IN_STATE);
+  });
+
+  it('does not restore a snooze — the user is back at the keyboard', () => {
+    const slot = currentSlot(at(14, 0), SETTINGS)!;
+    expect(restoreCheckInState(slot.date, slotClock(slot)).snoozedUntil).toBeNull();
+  });
+
+  it("scopes the restored key to its own day, so yesterday's record is inert today", () => {
+    const yesterday = restoreCheckInState('2026-08-02', '14:00');
+    expect(dueCheckIn(at(14, 0), SETTINGS, yesterday)?.key).toBe('2026-08-03T14:00');
   });
 });
 

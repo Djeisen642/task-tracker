@@ -17,14 +17,15 @@ These ship in v0.1. The app is not usable without them.
 
 ### The check-in loop
 
-| Status | Item                                                                                   |
-| ------ | -------------------------------------------------------------------------------------- |
-| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.  |
-| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval. |
-| done   | Work start / end times, weekend suppression, hourly nudges toggleable.                 |
-| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).     |
-| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                |
-| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.     |
+| Status | Item                                                                                                                                             |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                            |
+| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                           |
+| done   | Work start / end times, weekend suppression, hourly nudges toggleable.                                                                           |
+| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                               |
+| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                          |
+| done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in. |
+| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.                                                               |
 
 ### The vault
 
