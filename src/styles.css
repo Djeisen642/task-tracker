@@ -101,21 +101,11 @@ body {
 }
 
 .brand {
-  display: grid;
-  place-items: center;
   flex: none;
   width: 30px;
   height: 30px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, var(--accent), var(--accent-strong));
+  border-radius: 22%;
   box-shadow: 0 0 16px rgb(122 162 255 / 45%);
-}
-
-.brand-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #fff;
   /* A slow pulse so the card reads as "live" without demanding attention. */
   animation: breathe 3.4s ease-in-out infinite;
 }
@@ -427,7 +417,7 @@ body {
     transform: none;
   }
 
-  .brand-dot {
+  .brand {
     animation: none;
   }
 
