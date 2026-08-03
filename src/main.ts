@@ -32,7 +32,19 @@ import {
   type CheckInSlot,
   type CheckInState,
 } from './lib/schedule.ts';
-import { DEFAULT_SETTINGS, parseSettings, type Settings } from './lib/settings.ts';
+import {
+  applyDraft,
+  DAY_LABELS,
+  DEFAULT_SETTINGS,
+  parseSettings,
+  serializeSettings,
+  toDraft,
+  toggleWorkDay,
+  validateDraft,
+  type Settings,
+  type SettingsDraft,
+  type SettingsIssue,
+} from './lib/settings.ts';
 import {
   addTask,
   cycleStatus,
@@ -45,15 +57,21 @@ import { formatTrayStatus } from './lib/tray.ts';
 import {
   copyToClipboard,
   createVault,
-  hideCheckIn,
+  hideWindow,
+  isAutostartEnabled,
   loadSettingsJson,
   onCheckInRequested,
   onOpenVaultRequested,
+  onSettingsRequested,
   onStandupRequested,
   openVaultFolder,
+  saveSettingsJson,
+  setAutostart,
   setTrayStatus,
   showCheckIn,
   showError,
+  showWindow,
+  vaultPath,
 } from './lib/tauri.ts';
 import {
   openDay,
@@ -82,6 +100,24 @@ interface Elements {
   snooze: HTMLButtonElement;
   copyStandup: HTMLButtonElement;
   status: HTMLElement;
+  settings: SettingsElements;
+}
+
+interface SettingsElements {
+  panel: HTMLElement;
+  open: HTMLButtonElement;
+  close: HTMLButtonElement;
+  workStart: HTMLInputElement;
+  workEnd: HTMLInputElement;
+  workDays: HTMLElement;
+  hourlyEnabled: HTMLInputElement;
+  snoozeMinutes: HTMLInputElement;
+  launchAtLogin: HTMLInputElement;
+  vaultPath: HTMLElement;
+  openVault: HTMLButtonElement;
+  save: HTMLButtonElement;
+  cancel: HTMLButtonElement;
+  error: HTMLElement;
 }
 
 /** Resolve a required element or fail loudly at startup. */
@@ -106,6 +142,22 @@ function resolveElements(): Elements {
     snooze: mustGet<HTMLButtonElement>('snooze'),
     copyStandup: mustGet<HTMLButtonElement>('copy-standup'),
     status: mustGet('status'),
+    settings: {
+      panel: mustGet('settings'),
+      open: mustGet<HTMLButtonElement>('settings-open'),
+      close: mustGet<HTMLButtonElement>('settings-close'),
+      workStart: mustGet<HTMLInputElement>('work-start'),
+      workEnd: mustGet<HTMLInputElement>('work-end'),
+      workDays: mustGet('work-days'),
+      hourlyEnabled: mustGet<HTMLInputElement>('hourly-enabled'),
+      snoozeMinutes: mustGet<HTMLInputElement>('snooze-minutes'),
+      launchAtLogin: mustGet<HTMLInputElement>('launch-at-login'),
+      vaultPath: mustGet('vault-path'),
+      openVault: mustGet<HTMLButtonElement>('open-vault'),
+      save: mustGet<HTMLButtonElement>('settings-save'),
+      cancel: mustGet<HTMLButtonElement>('settings-cancel'),
+      error: mustGet('settings-error'),
+    },
   };
 }
 
@@ -123,6 +175,15 @@ class CheckInController {
   private visible = false;
   /** `true` between the decision to present and the card actually appearing. */
   private presenting = false;
+  /** `true` while the settings panel is on screen. */
+  private settingsOpen = false;
+  /**
+   * `true` when settings were opened with no check-in behind them, so closing
+   * them has to hide the window rather than reveal an empty card.
+   */
+  private settingsStandalone = false;
+  /** The working-day selection being edited, applied only on Save. */
+  private draftWorkDays: number[] = [];
   /** Last text pushed to the tray, so identical updates aren't re-sent. */
   private lastTrayStatus: string | null = null;
   /**
@@ -162,13 +223,66 @@ class CheckInController {
       void this.copyStandup();
     });
 
+    this.bindSettingsEvents();
+
     // Esc snoozes; the card is a prompt, not a modal you have to defeat.
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        void this.onSnooze();
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+
+      // With the panel up, Esc belongs to the panel. Falling through to the
+      // snooze would dismiss a check-in the user never looked at — and, when
+      // settings were opened from the tray with nothing due, would snooze a slot
+      // that isn't even on screen.
+      if (this.settingsOpen) {
+        void this.closeSettings();
+        return;
       }
+
+      void this.onSnooze();
     });
+  }
+
+  private bindSettingsEvents(): void {
+    const settings = this.elements.settings;
+
+    settings.open.addEventListener('click', () => {
+      void this.openSettings();
+    });
+
+    settings.close.addEventListener('click', () => {
+      void this.closeSettings();
+    });
+
+    settings.cancel.addEventListener('click', () => {
+      void this.closeSettings();
+    });
+
+    settings.save.addEventListener('click', () => {
+      void this.saveSettings();
+    });
+
+    settings.openVault.addEventListener('click', () => {
+      void openVaultFolder();
+    });
+
+    // One row of day toggles, built from the shared labels so the buttons and
+    // the `Date.getDay()` numbering can't drift apart.
+    settings.workDays.replaceChildren(
+      ...DAY_LABELS.map((label, day) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'day-toggle';
+        button.textContent = label;
+        button.dataset.day = String(day);
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => {
+          this.draftWorkDays = toggleWorkDay(this.draftWorkDays, day);
+          this.renderWorkDays();
+        });
+        return button;
+      }),
+    );
   }
 
   /** Load settings, publish the agent guide, and arm the scheduler. */
@@ -239,11 +353,19 @@ class CheckInController {
     await onOpenVaultRequested(() => {
       void openVaultFolder();
     });
+    await onSettingsRequested(() => {
+      void this.openSettings();
+    });
   }
 
   /** The scheduler cadence: decide whether to interrupt, and do nothing if not. */
   private async tick(): Promise<void> {
-    if (this.visible) return;
+    // A due check-in must not land on top of the settings panel: the card would
+    // paint underneath an overlay the user is typing into, and Done/Esc would
+    // reach the wrong surface. The slot stays outstanding and is served as soon
+    // as the panel closes, which is exactly the coalescing behavior slots exist
+    // for — nothing is lost by waiting.
+    if (this.visible || this.settingsOpen) return;
 
     // Keep the tray honest even on the many ticks that don't prompt.
     await this.refreshTrayStatus();
@@ -266,7 +388,7 @@ class CheckInController {
    * animation and poll paths before adding a mutual-exclusion flag.
    */
   private async present(slot: CheckInSlot): Promise<void> {
-    if (this.presenting) return;
+    if (this.presenting || this.settingsOpen) return;
     this.presenting = true;
 
     try {
@@ -306,6 +428,175 @@ class CheckInController {
     if (this.visible) return;
 
     await this.present(onDemandSlot(new Date(), this.settings));
+  }
+
+  /* ---------------------------------------------------------------- settings */
+
+  /**
+   * Bring up the settings panel, over the card if one is open and alone if not.
+   *
+   * Reached two ways — the gear on the card, and the tray item — which differ in
+   * whether the window is already on screen. `settingsStandalone` records which,
+   * because closing has to put things back the way it found them.
+   */
+  private async openSettings(): Promise<void> {
+    if (this.settingsOpen) return;
+
+    this.settingsOpen = true;
+    this.settingsStandalone = !this.visible;
+
+    this.fillSettingsForm(toDraft(this.settings));
+    this.showSettingsIssues([]);
+    await this.loadNativeSettingsFields();
+
+    const panel = this.elements.settings.panel;
+    panel.hidden = false;
+
+    // The panel covers the card but does not trap focus on its own, and
+    // `aria-modal` is only a hint to assistive tech. Without this, Tab walks
+    // straight into the task input behind the overlay and you type your next
+    // task into a field you cannot see.
+    this.elements.card.inert = true;
+
+    // From the tray the window itself is hidden, so it has to come up. No
+    // attention request: the user clicked a menu item a moment ago.
+    if (this.settingsStandalone) await showWindow();
+
+    // Same rAF two-step as the card: let the browser paint the off-stage
+    // position once, or the transition has nothing to animate from.
+    requestAnimationFrame(() => {
+      panel.classList.add('is-open');
+    });
+
+    this.elements.settings.workStart.focus();
+  }
+
+  /**
+   * Close the panel, discarding anything not saved.
+   *
+   * There is no exit animation on purpose. Removing the class and hiding in the
+   * same frame keeps the close synchronous; animating out would mean hiding on a
+   * timer, and a pending timer is a thing the next open has to reason about.
+   */
+  private async closeSettings(): Promise<void> {
+    if (!this.settingsOpen) return;
+
+    this.settingsOpen = false;
+
+    const panel = this.elements.settings.panel;
+    panel.classList.remove('is-open');
+    panel.hidden = true;
+    this.elements.card.inert = false;
+
+    if (this.settingsStandalone) {
+      await hideWindow();
+      return;
+    }
+
+    // A check-in is still up behind the panel; put the cursor back where it was.
+    this.elements.taskInput.focus();
+  }
+
+  /**
+   * Validate, persist, and adopt the edited settings.
+   *
+   * Order matters: `settings.json` is written *before* the in-memory settings
+   * change, so a failed write leaves the running app on the values that are
+   * actually on disk rather than on values that would vanish at the next launch.
+   */
+  private async saveSettings(): Promise<void> {
+    const draft = this.readDraft();
+    const issues = validateDraft(draft);
+    this.showSettingsIssues(issues);
+    if (issues.length > 0) return;
+
+    const next = applyDraft(this.settings, draft);
+
+    try {
+      await saveSettingsJson(serializeSettings(next));
+    } catch (error) {
+      await showError('Could not save your settings', describeError(error));
+      return;
+    }
+
+    this.settings = next;
+
+    // Launch-at-login lives in the OS, not in settings.json. It is applied after
+    // the write and its failure is reported without undoing that write — the
+    // rest of the settings did save, and pretending otherwise would be worse.
+    try {
+      await setAutostart(this.elements.settings.launchAtLogin.checked);
+    } catch (error) {
+      await showError('Could not change launch at login', describeError(error));
+    }
+
+    await this.closeSettings();
+    await this.refreshTrayStatus();
+  }
+
+  /** Read the native-owned fields: the vault path and the autostart state. */
+  private async loadNativeSettingsFields(): Promise<void> {
+    const settings = this.elements.settings;
+
+    try {
+      // `textContent`, like every other path through this app: the vault
+      // directory is a string from outside the webview.
+      settings.vaultPath.textContent = await vaultPath();
+    } catch (error) {
+      settings.vaultPath.textContent = 'Could not read the vault location.';
+      console.warn('Could not read the vault path:', describeError(error));
+    }
+
+    try {
+      settings.launchAtLogin.checked = await isAutostartEnabled();
+    } catch (error) {
+      settings.launchAtLogin.checked = false;
+      console.warn('Could not read the autostart state:', describeError(error));
+    }
+  }
+
+  private readDraft(): SettingsDraft {
+    const settings = this.elements.settings;
+    return {
+      workStart: settings.workStart.value,
+      workEnd: settings.workEnd.value,
+      hourlyEnabled: settings.hourlyEnabled.checked,
+      snoozeMinutes: settings.snoozeMinutes.value,
+      workDays: [...this.draftWorkDays],
+    };
+  }
+
+  private fillSettingsForm(draft: SettingsDraft): void {
+    const settings = this.elements.settings;
+    settings.workStart.value = draft.workStart;
+    settings.workEnd.value = draft.workEnd;
+    settings.hourlyEnabled.checked = draft.hourlyEnabled;
+    settings.snoozeMinutes.value = draft.snoozeMinutes;
+
+    this.draftWorkDays = [...draft.workDays];
+    this.renderWorkDays();
+  }
+
+  private renderWorkDays(): void {
+    for (const button of this.elements.settings.workDays.querySelectorAll('button')) {
+      const day = Number(button.dataset.day);
+      button.setAttribute('aria-pressed', String(this.draftWorkDays.includes(day)));
+    }
+  }
+
+  /** Mark the offending controls and say what's wrong; `[]` clears both. */
+  private showSettingsIssues(issues: readonly SettingsIssue[]): void {
+    const settings = this.elements.settings;
+    const flagged = new Set(issues.map((issue) => issue.field));
+
+    settings.workStart.classList.toggle('is-invalid', flagged.has('workStart'));
+    settings.workEnd.classList.toggle('is-invalid', flagged.has('workEnd'));
+    settings.snoozeMinutes.classList.toggle('is-invalid', flagged.has('snoozeMinutes'));
+    settings.workDays.classList.toggle('is-invalid', flagged.has('workDays'));
+
+    // Every message at once. Reporting one problem per Save press turns a form
+    // with three mistakes in it into three round trips.
+    settings.error.textContent = issues.map((issue) => issue.message).join(' ');
   }
 
   private render(): void {
@@ -466,7 +757,7 @@ class CheckInController {
     this.elements.card.classList.remove('is-open');
     this.visible = false;
     this.slot = null;
-    await hideCheckIn();
+    await hideWindow();
   }
 
   /**
