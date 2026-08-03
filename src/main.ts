@@ -445,30 +445,56 @@ class CheckInController {
     this.settingsOpen = true;
     this.settingsStandalone = !this.visible;
 
-    this.fillSettingsForm(toDraft(this.settings));
-    this.showSettingsIssues([]);
-    await this.loadNativeSettingsFields();
+    try {
+      this.fillSettingsForm(toDraft(this.settings));
+      this.showSettingsIssues([]);
+      await this.loadNativeSettingsFields();
+
+      const panel = this.elements.settings.panel;
+      panel.hidden = false;
+
+      // The panel covers the card but does not trap focus on its own, and
+      // `aria-modal` is only a hint to assistive tech. Without this, Tab walks
+      // straight into the task input behind the overlay and you type your next
+      // task into a field you cannot see.
+      this.elements.card.inert = true;
+
+      // From the tray the window itself is hidden, so it has to come up. No
+      // attention request: the user clicked a menu item a moment ago.
+      if (this.settingsStandalone) await showWindow();
+
+      // Same rAF two-step as the card: let the browser paint the off-stage
+      // position once, or the transition has nothing to animate from.
+      requestAnimationFrame(() => {
+        panel.classList.add('is-open');
+      });
+
+      this.elements.settings.workStart.focus();
+    } catch (error) {
+      // A raised `settingsOpen` that never comes down is far worse than failing
+      // to open: the panel could never reopen, *and* `tick()` would suppress
+      // every check-in for the rest of the day — the app would simply go quiet.
+      // `show()`/`set_focus()` are real IPC calls that can reject, and the
+      // caller is a `void`-ed click handler, so nothing else would catch this.
+      // Same reasoning as the `presenting` flag's `finally` in `present()`.
+      this.hideSettingsPanel();
+      await showError('Could not open settings', describeError(error));
+    }
+  }
+
+  /**
+   * Put the panel away and hand the card back, without touching the window.
+   *
+   * Split out so the failure path above resets exactly the same state the
+   * ordinary close does, and can't itself throw part-way through.
+   */
+  private hideSettingsPanel(): void {
+    this.settingsOpen = false;
 
     const panel = this.elements.settings.panel;
-    panel.hidden = false;
-
-    // The panel covers the card but does not trap focus on its own, and
-    // `aria-modal` is only a hint to assistive tech. Without this, Tab walks
-    // straight into the task input behind the overlay and you type your next
-    // task into a field you cannot see.
-    this.elements.card.inert = true;
-
-    // From the tray the window itself is hidden, so it has to come up. No
-    // attention request: the user clicked a menu item a moment ago.
-    if (this.settingsStandalone) await showWindow();
-
-    // Same rAF two-step as the card: let the browser paint the off-stage
-    // position once, or the transition has nothing to animate from.
-    requestAnimationFrame(() => {
-      panel.classList.add('is-open');
-    });
-
-    this.elements.settings.workStart.focus();
+    panel.classList.remove('is-open');
+    panel.hidden = true;
+    this.elements.card.inert = false;
   }
 
   /**
@@ -481,12 +507,7 @@ class CheckInController {
   private async closeSettings(): Promise<void> {
     if (!this.settingsOpen) return;
 
-    this.settingsOpen = false;
-
-    const panel = this.elements.settings.panel;
-    panel.classList.remove('is-open');
-    panel.hidden = true;
-    this.elements.card.inert = false;
+    this.hideSettingsPanel();
 
     if (this.settingsStandalone) {
       await hideWindow();
