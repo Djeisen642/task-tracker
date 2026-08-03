@@ -25,6 +25,8 @@
   --accent-strong: #5b86f5;
   --progress: #f5c451;
   --done: #5ecf8d;
+  --warn: #f4948a;
+  --warn-wash: rgb(244 148 138 / 10%);
 
   --radius: 16px;
   --radius-sm: 9px;
@@ -32,6 +34,13 @@
 
   --enter-duration: 420ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /*
+   * The settings panel is the only part of the app that uses native controls
+   * (time, number, checkbox). Without this the platform paints them light — a
+   * white time picker in the middle of a dark card.
+   */
+  color-scheme: dark;
 }
 
 * {
@@ -372,6 +381,17 @@ body {
   align-self: flex-start;
 }
 
+/*
+ * A glyph button doesn't need a text button's horizontal padding. The header
+ * budget is tight — the gear shares it with the headline, the subhead and
+ * Snooze — and every pixel here is one the subhead doesn't have to wrap at.
+ */
+.icon-button.is-glyph {
+  padding: 7px 9px;
+  font-size: 13px;
+  line-height: 1.15;
+}
+
 .status {
   flex: 1;
   overflow: hidden;
@@ -386,6 +406,243 @@ body {
 
 .status.is-visible {
   opacity: 1;
+}
+
+/* ----------------------------------------------------------------- settings */
+
+/*
+ * The settings overlay fills the window and sits above the card. It is a
+ * sibling of `.card`, so when it opens from the tray with no check-in due the
+ * card stays off-stage and this panel is the only thing that paints.
+ */
+.settings {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+
+  background: var(--surface);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow:
+    0 18px 50px rgb(0 0 0 / 45%),
+    0 2px 8px rgb(0 0 0 / 30%);
+  backdrop-filter: blur(22px) saturate(140%);
+
+  opacity: 0;
+  transform: translateX(-110%);
+  transition:
+    transform var(--enter-duration) var(--ease-out),
+    opacity calc(var(--enter-duration) * 0.6) ease-out;
+  will-change: transform, opacity;
+}
+
+/*
+ * `display: flex` above overrides the UA stylesheet's `[hidden] { display: none }`,
+ * so the attribute has to be re-honored explicitly — without this the panel is
+ * permanently on screen, covering the card, and the app looks dead on launch.
+ */
+.settings[hidden] {
+  display: none;
+}
+
+.settings.is-open {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-title {
+  flex: 1;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /*
+   * Tight on purpose. The window is a fixed 470px and this panel has six
+   * fields; at 13px gaps the content came to ~467px and clipped the last
+   * control against the footer. It still scrolls if a platform's native
+   * controls are taller than Chromium's.
+   */
+  gap: 11px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge) transparent;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-joiner {
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+
+.field-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/*
+ * Wide enough for a 12-hour rendering. The *value* is always 24-hour `HH:MM`,
+ * but the webview paints `type="time"` in the OS locale's format, so a US
+ * machine needs room for `05:00 PM` plus the picker glyph — at 108px it
+ * rendered as `05:00 P`.
+ */
+.time-input {
+  flex: none;
+  width: 132px;
+}
+
+.number-input {
+  flex: none;
+  width: 74px;
+}
+
+/* Mark an input the user has to revisit, alongside the message in the footer. */
+.entry-input.is-invalid {
+  border-color: var(--warn);
+  background: var(--warn-wash);
+}
+
+.day-toggles {
+  display: flex;
+  gap: 4px;
+}
+
+.day-toggle {
+  flex: 1;
+  padding: 7px 0;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+  background: var(--surface-raised);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    color 140ms ease-out,
+    background-color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+
+.day-toggle:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.day-toggle[aria-pressed='true'] {
+  color: #0f1116;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.day-toggles.is-invalid .day-toggle {
+  border-color: var(--warn);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.check input {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/*
+ * The one place in the app that shows a filesystem path. It is read-only — the
+ * folder picker is post-MVP — so it wraps rather than truncating: a path you
+ * can't read is no more useful than no path at all.
+ */
+.vault-path {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  background: var(--surface-raised);
+  border-radius: var(--radius-sm);
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+}
+
+/* Path and its reveal button share a row, which is what makes the six fields
+   fit the window without scrolling. */
+.vault-row {
+  align-items: stretch;
+}
+
+.vault-row .ghost-button {
+  flex: none;
+}
+
+.settings-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.settings-error {
+  flex: 1;
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--warn);
+}
+
+.day-toggle:focus-visible,
+.check input:focus-visible,
+.number-input:focus-visible,
+.time-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* --------------------------------------------------------------- animations */
@@ -408,12 +665,14 @@ body {
  * sliding and pulsing.
  */
 @media (prefers-reduced-motion: reduce) {
-  .card {
+  .card,
+  .settings {
     transform: none;
     transition: opacity 120ms ease-out;
   }
 
-  .card.is-open {
+  .card.is-open,
+  .settings.is-open {
     transform: none;
   }
 

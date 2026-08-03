@@ -28,17 +28,29 @@ export function isTauri(): boolean {
  * The Rust side follows up with an attention request; see `src-tauri/src/lib.rs`.
  */
 export async function showCheckIn(): Promise<void> {
+  await showWindow();
+  await requestAttention();
+}
+
+/**
+ * Show and focus the window, without asking for attention.
+ *
+ * This is the right entry point for anything the user *initiated* — opening
+ * settings from the tray, say. `showCheckIn` adds the attention request because
+ * a check-in arrives unbidden from a timer; flashing the taskbar for a window
+ * someone just asked for is nagging them about their own click.
+ */
+export async function showWindow(): Promise<void> {
   if (!isTauri()) return;
 
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
   const win = getCurrentWindow();
   await win.show();
   await win.setFocus();
-  await requestAttention();
 }
 
-/** Hide the check-in window. */
-export async function hideCheckIn(): Promise<void> {
+/** Hide the window. */
+export async function hideWindow(): Promise<void> {
   if (!isTauri()) return;
 
   const { getCurrentWindow } = await import('@tauri-apps/api/window');

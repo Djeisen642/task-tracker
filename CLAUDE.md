@@ -61,14 +61,14 @@ something as finished or "working" unless you have run these and seen them pass.
 
 ```
 src/
-  main.ts               # CheckInController: scheduler tick + serialized vault writes
-  styles.css            # Transparent window; top-left slide-in check-in card
+  main.ts               # CheckInController: scheduler tick, serialized vault writes, settings panel
+  styles.css            # Transparent window; top-left slide-in check-in card + settings overlay
   lib/
     dates.ts(.test)      # Local-date/clock helpers, ISO week math
     time.ts              # Millisecond constants
     tasks.ts(.test)      # Task model, status cycle, carry-over
     schedule.ts(.test)   # Slot-based check-in scheduler (the heart of the app)
-    settings.ts(.test)   # Settings model + defensive parsing
+    settings.ts(.test)   # Settings model, defensive parsing, panel draft + validation
     vault.ts(.test)      # VaultPort seam, day load/save, MemoryVault fake
     errors.ts(.test)     # describeError() for native dialogs
     tauri.ts             # Optional native bridge; degrades gracefully in a browser
@@ -87,6 +87,7 @@ src-tauri/
 e2e/
   harness.ts            # startApp(): frozen clock + seeded localStorage vault
   checkin.spec.ts       # The check-in loop, driven in a real browser
+  settings.spec.ts      # The settings panel: validation, persistence, live effect
   capture.spec.ts       # Screenshots into docs/screenshots/
 docs/
   future-work.md        # Everything planned, with the MVP line
@@ -135,6 +136,22 @@ docs/
   one is typed into — so it is _not_ click-through, and it deliberately occupies
   the **top-left** corner, because bottom-right belongs to
   noticeable-calendar-alert. Two utilities in one corner means ignoring both.
+- **Settings are an overlay in the one window, not a second window.** A second
+  Tauri window would need its own capability set and its own positioning, and
+  would surface in the taskbar this app skips. The panel is a sibling of the
+  card, so it can paint alone when opened from the tray with nothing due — and
+  it marks the card `inert` while open, because `aria-modal` doesn't stop Tab
+  from reaching an input hidden behind the overlay.
+- **The scheduler does not prompt over the settings panel.** `tick()` returns
+  early while it is open. Slots coalesce, so the check-in is served as soon as
+  the panel closes rather than being lost.
+- **The form validates; the file falls back.** `parseSettings` silently repairs
+  a corrupt `settings.json` so the app always starts. `validateDraft` does the
+  opposite — it reports, because a settings panel that silently reverts what you
+  typed teaches you nothing. Don't collapse the two.
+- **`settings.json` is written before the in-memory settings change**, so a
+  failed write leaves the running app on the values actually on disk. Launch-at-
+  login is OS state applied after, and its failure doesn't undo the save.
 - **The frontend must run framework-free in a plain browser too.** Every native
   call in `tauri.ts` is guarded by `isTauri()` and degrades to a no-op or a
   browser equivalent (the vault falls back to `localStorage`). This keeps
@@ -143,6 +160,11 @@ docs/
   CSS import injects a `<style>` tag in dev, which the app's `style-src 'self'`
   CSP blocks. That breaks only in the desktop webview — never in lint, tests, or
   a browser `npm run dev`.
+- **Giving an element a `display` also overrides `[hidden]`.** `.settings` is a
+  flex column, so it needs an explicit `.settings[hidden] { display: none }` —
+  without it the panel is on screen permanently, covering the card, and the app
+  looks dead on launch. Any new `hidden` element with a `display` rule needs the
+  same line.
 - **Filenames are validated in Rust.** `is_safe_name` in `src-tauri/src/vault.rs`
   is the security boundary; the TypeScript `isSafeVaultName` is an early-failure
   convenience. Keep both in sync, and never widen the Rust one to a general path.

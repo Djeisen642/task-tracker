@@ -75,6 +75,32 @@ export function readVaultFile(page: Page, name: string): Promise<string | null> 
   return page.evaluate((key) => localStorage.getItem(key), VAULT_PREFIX + name);
 }
 
+/** The settings the app has persisted, parsed. */
+export function readSettings(page: Page): Promise<Record<string, unknown> | null> {
+  return page.evaluate((key) => {
+    const raw = localStorage.getItem(key);
+    return raw === null ? null : (JSON.parse(raw) as Record<string, unknown>);
+  }, SETTINGS_KEY);
+}
+
+/**
+ * Open the settings panel and let its entrance animation start.
+ *
+ * The click is dispatched through the DOM rather than Playwright's normal click
+ * because the gear lives in the card header, and the card is parked off-stage
+ * (`translateX(-110%)`) whenever no check-in is up. On the desktop that case is
+ * reached from the tray instead, which a browser has no way to emulate — the
+ * controller runs the same `openSettings()` either way, so this exercises the
+ * real path including the standalone-window branch.
+ */
+export async function openSettings(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.getElementById('settings-open')?.click();
+  });
+  // Flush the rAF that adds `.is-open`, the same beat `startApp` gives the card.
+  await page.clock.runFor(100);
+}
+
 /** Every filename currently in the browser-backed vault. */
 export function listVaultFiles(page: Page): Promise<string[]> {
   return page.evaluate((prefix) => {
