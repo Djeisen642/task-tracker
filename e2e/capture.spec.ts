@@ -12,7 +12,7 @@
 
 import { expect, test } from '@playwright/test';
 
-import { startApp, dayFile } from './harness.ts';
+import { startApp, dayFile, openSettings } from './harness.ts';
 
 const SHOTS = 'docs/screenshots';
 
@@ -65,6 +65,18 @@ test('capture: an hourly check-in mid-flow', async ({ page }) => {
 
   await settle(page);
   await page.screenshot({ path: `${SHOTS}/hourly.png` });
+});
+
+test('capture: the settings panel', async ({ page }) => {
+  await startApp(page, {
+    settings: { workStart: '08:30', workEnd: '17:00', snoozeMinutes: 10 },
+  });
+
+  await openSettings(page);
+  await expect(page.locator('#settings')).toHaveClass(/is-open/);
+  await page.waitForTimeout(600);
+
+  await page.screenshot({ path: `${SHOTS}/settings.png` });
 });
 
 test('capture: the end-of-day wrap-up', async ({ page }) => {

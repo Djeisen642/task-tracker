@@ -81,6 +81,8 @@ pub fn run() {
                 MenuItem::with_id(app, "standup", "Copy standup summary", true, None::<&str>)?;
             let vault_item =
                 MenuItem::with_id(app, "vault", "Open vault folder", true, None::<&str>)?;
+            let settings_item =
+                MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
             let menu = Menu::with_items(
@@ -91,6 +93,7 @@ pub fn run() {
                     &check_in_item,
                     &standup_item,
                     &vault_item,
+                    &settings_item,
                     &quit_item,
                 ],
             )?;
@@ -112,6 +115,11 @@ pub fn run() {
                     }
                     "vault" => {
                         let _ = app.emit("open-vault", ());
+                    }
+                    // The webview owns the panel and shows its own window, so
+                    // this side does not touch window visibility here.
+                    "settings" => {
+                        let _ = app.emit("open-settings", ());
                     }
                     _ => {}
                 });

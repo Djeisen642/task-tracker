@@ -49,14 +49,14 @@ These ship in v0.1. The app is not usable without them.
 
 ### Shell
 
-| Status  | Item                                                                                                                    |
-| ------- | ----------------------------------------------------------------------------------------------------------------------- |
-| done    | Tray icon and menu: status line, check in now, copy standup, open vault, quit.                                          |
-| done    | Least-privilege capabilities — only the plugin commands JS invokes.                                                     |
-| done    | End-to-end suite driving the real card in a browser, plus screenshot capture and a `verify-app` skill.                  |
-| partial | Launch at login: the bridge is wired, but nothing toggles it yet (needs the settings UI below).                         |
-| todo    | **A settings UI.** Work hours are only editable by hand-editing `settings.json`. This is the largest remaining MVP gap. |
-| done    | App icons generated from the SVG master and committed (`generate_context!` embeds them at compile time).                |
+| Status | Item                                                                                                                                               |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| done   | Tray icon and menu: status line, check in now, copy standup, open vault, settings, quit.                                                           |
+| done   | Least-privilege capabilities — only the plugin commands JS invokes.                                                                                |
+| done   | End-to-end suite driving the real card in a browser, plus screenshot capture and a `verify-app` skill.                                             |
+| done   | Launch at login, toggled from the settings panel.                                                                                                  |
+| done   | **A settings panel** — work window, working days, hourly nudges, snooze, launch at login, and the vault path (read-only). Tray item and card gear. |
+| done   | App icons generated from the SVG master and committed (`generate_context!` embeds them at compile time).                                           |
 
 ---
 
@@ -88,7 +88,11 @@ SQLite without writing the Markdown first.
 Other items:
 
 - Full-text search across the vault, surfaced in the app.
-- Configurable vault path via a folder picker (the Rust command exists; no UI).
+- Configurable vault path via a folder picker. The Rust command (`vault_set_dir`)
+  and the JS bridge both exist, and the settings panel already displays the
+  active path — what's missing is the picker itself, which needs the dialog
+  plugin's `open` permission. Deliberately left out of the MVP panel rather than
+  widening the capability set for a below-the-line feature.
 - Optional encryption at rest, if work notes ever warrant it.
 
 ## The people pillar
@@ -179,8 +183,19 @@ hardware before trusting it:
    Windows 11, including on a multi-monitor setup with mixed DPI.
 3. **Tray icon and menu** rendering, and each menu item's event reaching the
    webview.
-4. **The autostart plugin** actually registering at login.
-5. **Clipboard writes** from a hidden window — the standup copy fires from the
+4. **The autostart plugin** actually registering at login. The settings panel now
+   toggles it, but `enable()`/`disable()` are no-ops in a browser, so the
+   checkbox has only ever been driven against a stub.
+5. **The tray's "Settings…" item** reaching the webview. The panel itself is
+   covered end to end, but only via the card's gear — a browser has no tray, so
+   the `open-settings` event and the hidden-window path it opens through are
+   reviewed, not run.
+6. **Clipboard writes** from a hidden window — the standup copy fires from the
    tray while the card may not be visible.
-6. **The whole loop end to end** — a real workday of hourly prompts producing a
+7. **The settings panel's native controls.** `input[type="time"]` is painted by
+   the webview in the OS locale's format — 12-hour with a meridiem on a US
+   machine, 24-hour elsewhere — and the field is sized for the wider of the two.
+   Worth a look on a real Windows install, along with `color-scheme: dark`
+   actually darkening the time picker's dropdown.
+8. **The whole loop end to end** — a real workday of hourly prompts producing a
    day file you'd actually want to read back.

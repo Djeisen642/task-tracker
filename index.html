@@ -29,6 +29,15 @@
           <h1 id="headline" class="headline">Quick check-in</h1>
           <p id="subhead" class="subhead"></p>
         </div>
+        <button
+          id="settings-open"
+          class="icon-button is-glyph"
+          type="button"
+          title="Settings"
+          aria-label="Settings"
+        >
+          ⚙
+        </button>
         <button id="snooze" class="icon-button" type="button" title="Snooze (Esc)">Snooze</button>
       </header>
 
@@ -68,6 +77,101 @@
         <span id="status" class="status" role="status"></span>
       </footer>
     </main>
+
+    <!--
+      Settings, as an overlay rather than a second window: a new Tauri window
+      would need its own capability set, its own positioning against the same
+      top-left corner, and would show in the taskbar this app deliberately skips.
+      It is a sibling of the card, not a child, so opening it from the tray with
+      no check-in due paints the panel alone against the transparent window.
+    -->
+    <aside
+      id="settings"
+      class="settings"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-title"
+      hidden
+    >
+      <header class="settings-head">
+        <h2 id="settings-title" class="settings-title">Settings</h2>
+        <button id="settings-close" class="icon-button" type="button" title="Close (Esc)">
+          Close
+        </button>
+      </header>
+
+      <div class="settings-body">
+        <div class="field">
+          <span class="field-label">Work day</span>
+          <div class="field-row">
+            <input
+              id="work-start"
+              class="entry-input time-input"
+              type="time"
+              aria-label="Work day starts at"
+            />
+            <span class="field-joiner">to</span>
+            <input
+              id="work-end"
+              class="entry-input time-input"
+              type="time"
+              aria-label="Work day ends at"
+            />
+          </div>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Working days</span>
+          <!-- Buttons are generated from DAY_LABELS so the two can't drift. -->
+          <div id="work-days" class="day-toggles" role="group" aria-label="Working days"></div>
+        </div>
+
+        <div class="field">
+          <label class="check">
+            <input id="hourly-enabled" type="checkbox" />
+            <span>Nudge me every hour</span>
+          </label>
+          <p class="field-hint">The day's opener and wrap-up always run.</p>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="snooze-minutes">Snooze for</label>
+          <div class="field-row">
+            <input
+              id="snooze-minutes"
+              class="entry-input number-input"
+              type="number"
+              min="1"
+              max="60"
+              step="1"
+              inputmode="numeric"
+            />
+            <span class="field-joiner">minutes</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="check">
+            <input id="launch-at-login" type="checkbox" />
+            <span>Start Task Tracker at login</span>
+          </label>
+        </div>
+
+        <div class="field">
+          <span class="field-label">Vault folder</span>
+          <div class="field-row vault-row">
+            <p id="vault-path" class="vault-path"></p>
+            <button id="open-vault" class="ghost-button" type="button">Open</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="settings-foot">
+        <button id="settings-save" class="primary-button" type="button">Save</button>
+        <button id="settings-cancel" class="ghost-button" type="button">Cancel</button>
+        <p id="settings-error" class="settings-error" role="alert"></p>
+      </footer>
+    </aside>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
