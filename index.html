@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Task Tracker</title>
-    <link rel="icon" href="data:," />
+    <link rel="icon" type="image/svg+xml" href="./src-tauri/icons/icon-small.svg" />
     <!--
       Linked rather than imported from main.ts on purpose: a JS `import` of CSS
       injects a <style> tag in dev, which the app's `style-src 'self'` CSP
@@ -22,9 +22,7 @@
     -->
     <main id="card" class="card" aria-live="polite">
       <header class="card-head">
-        <div class="brand" aria-hidden="true">
-          <span class="brand-dot"></span>
-        </div>
+        <img class="brand" src="./src-tauri/icons/icon-small.svg" alt="" aria-hidden="true" />
         <div class="head-text">
           <h1 id="headline" class="headline">Quick check-in</h1>
           <p id="subhead" class="subhead"></p>
