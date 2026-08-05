@@ -47,10 +47,12 @@ import {
 } from './lib/settings.ts';
 import {
   addTask,
+  completedBeforeCheckIn,
   cycleStatus,
   removeTask,
   setTaskStatus,
   summarizeTasks,
+  tasksForCheckIn,
   type Task,
 } from './lib/tasks.ts';
 import { formatTrayStatus } from './lib/tray.ts';
@@ -186,6 +188,12 @@ class CheckInController {
   private draftWorkDays: number[] = [];
   /** Last text pushed to the tray, so identical updates aren't re-sent. */
   private lastTrayStatus: string | null = null;
+  /**
+   * Tasks already marked done when this check-in opened. They stay in the day
+   * file but are hidden until wrap-up; only work finished during this prompt
+   * lingers at the bottom of the list.
+   */
+  private completedBeforeCheckIn = new Set<string>();
   /**
    * Serializes vault writes. Every save appends to this chain rather than
    * racing, so a fast "add task, add task, Done" can't produce interleaved
@@ -410,6 +418,7 @@ class CheckInController {
 
     this.slot = slot;
     this.visible = true;
+    this.completedBeforeCheckIn = completedBeforeCheckIn(this.day.tasks);
 
     this.render();
     await showCheckIn();
@@ -628,8 +637,11 @@ class CheckInController {
     this.elements.headline.textContent = describeCheckIn(slot.kind);
     this.elements.subhead.textContent = this.describeProgress(day, slot);
 
-    this.elements.taskList.replaceChildren(...day.tasks.map((task) => this.renderTask(task)));
-    this.elements.emptyState.hidden = day.tasks.length > 0;
+    const previouslyCompleted =
+      slot.kind === 'day-end' ? new Set<string>() : this.completedBeforeCheckIn;
+    const visible = tasksForCheckIn(day.tasks, previouslyCompleted);
+    this.elements.taskList.replaceChildren(...visible.map((task) => this.renderTask(task)));
+    this.elements.emptyState.hidden = visible.length > 0;
   }
 
   private describeProgress(day: DayDocument, slot: CheckInSlot): string {

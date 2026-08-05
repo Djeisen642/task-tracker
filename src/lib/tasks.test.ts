@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest';
 import {
   addTask,
   carryOverTasks,
+  completedBeforeCheckIn,
   cycleStatus,
   isOpen,
   removeTask,
   sameTask,
   setTaskStatus,
   summarizeTasks,
+  tasksForCheckIn,
   type Task,
 } from './tasks.ts';
 
@@ -45,6 +47,51 @@ describe('cycleStatus', () => {
 
   it('returns to the start after three steps', () => {
     expect(cycleStatus(cycleStatus(cycleStatus('upcoming')))).toBe('upcoming');
+  });
+});
+
+describe('tasksForCheckIn', () => {
+  it('puts in-progress work first, then upcoming, then completed', () => {
+    expect(tasksForCheckIn(TASKS).map((task) => task.title)).toEqual([
+      'Ship the rollback',
+      'Draft the RFC',
+      'Review the checklist',
+    ]);
+  });
+
+  it('preserves relative order within each group', () => {
+    const tasks: Task[] = [
+      { title: 'First done', status: 'completed' },
+      { title: 'Still open', status: 'upcoming' },
+      { title: 'Second done', status: 'completed' },
+      { title: 'Also open', status: 'in-progress' },
+    ];
+
+    expect(tasksForCheckIn(tasks).map((task) => task.title)).toEqual([
+      'Also open',
+      'Still open',
+      'First done',
+      'Second done',
+    ]);
+  });
+
+  it('hides tasks that were already done when the check-in opened', () => {
+    const tasks: Task[] = [
+      { title: 'Old done', status: 'completed' },
+      { title: 'Still open', status: 'upcoming' },
+      { title: 'Just finished', status: 'completed' },
+    ];
+
+    expect(tasksForCheckIn(tasks, new Set(['Old done'])).map((task) => task.title)).toEqual([
+      'Still open',
+      'Just finished',
+    ]);
+  });
+});
+
+describe('completedBeforeCheckIn', () => {
+  it('snapshots completed titles from the opening task list', () => {
+    expect(completedBeforeCheckIn(TASKS)).toEqual(new Set(['Review the checklist']));
   });
 });
 
