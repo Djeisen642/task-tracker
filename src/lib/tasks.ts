@@ -55,6 +55,44 @@ export function cycleStatus(status: TaskStatus): TaskStatus {
   }
 }
 
+/** Order tasks for the check-in card: in-progress, then upcoming, then newly completed. */
+export function tasksForCheckIn(
+  tasks: readonly Task[],
+  previouslyCompleted: ReadonlySet<string> = new Set(),
+): Task[] {
+  const inProgress: Task[] = [];
+  const upcoming: Task[] = [];
+  const doneThisSession: Task[] = [];
+
+  for (const task of tasks) {
+    if (task.status === 'in-progress') {
+      inProgress.push(task);
+    } else if (task.status === 'upcoming') {
+      upcoming.push(task);
+    } else if (!wasCompletedBefore(task.title, previouslyCompleted)) {
+      doneThisSession.push(task);
+    }
+  }
+
+  return [...inProgress, ...upcoming, ...doneThisSession];
+}
+
+/** Titles that were already done when this check-in opened — hidden until day-end. */
+export function completedBeforeCheckIn(tasks: readonly Task[]): Set<string> {
+  const titles = new Set<string>();
+  for (const task of tasks) {
+    if (task.status === 'completed') titles.add(task.title);
+  }
+  return titles;
+}
+
+function wasCompletedBefore(title: string, previouslyCompleted: ReadonlySet<string>): boolean {
+  for (const existing of previouslyCompleted) {
+    if (sameTask(existing, title)) return true;
+  }
+  return false;
+}
+
 /**
  * Append a task, ignoring blank titles and exact duplicates.
  *

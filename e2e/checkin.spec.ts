@@ -46,7 +46,7 @@ test('adds a task and renders it', async ({ page }) => {
 });
 
 test('cycles a task through its three states', async ({ page }) => {
-  await startApp(page);
+  await startApp(page, { now: new Date(2026, 7, 3, 17, 30) });
 
   await page.fill('#task-input', 'Ship the rollback');
   await page.press('#task-input', 'Enter');
@@ -59,9 +59,54 @@ test('cycles a task through its three states', async ({ page }) => {
 
   await task.locator('.task-toggle').click();
   await expect(task).toHaveClass(/is-completed/);
+  await expect(page.locator('#subhead')).toHaveText('1 done, 0 still open — plan tomorrow?');
 
   await task.locator('.task-toggle').click();
   await expect(task).not.toHaveClass(/is-in-progress|is-completed/);
+  await expect(page.locator('#subhead')).toHaveText('0 done, 1 still open — plan tomorrow?');
+});
+
+test('hides completed tasks on the next hourly check-in', async ({ page }) => {
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 10, 0),
+    files: { '2026-08-03.md': dayFile('2026-08-03', [], { lastCheckIn: '09:00' }) },
+  });
+
+  await page.fill('#task-input', 'Ship the rollback');
+  await page.press('#task-input', 'Enter');
+  await page.locator('.task-toggle').first().click();
+  await page.locator('.task-toggle').first().click();
+  await expect(page.locator('#subhead')).toHaveText('1 of 1 done');
+
+  await page.click('#done');
+  await expect(page.locator('#card')).not.toHaveClass(/is-open/);
+
+  await advanceMinutes(page, 61);
+  await expect(page.locator('#card')).toHaveClass(/is-open/);
+  await expect(page.locator('#headline')).toHaveText('Quick check-in');
+  await expect(page.locator('.task')).toHaveCount(0);
+  await expect(page.locator('#subhead')).toHaveText('1 of 1 done');
+});
+
+test('moves a completed task to the bottom while the check-in is still open', async ({ page }) => {
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 10, 0),
+    files: { '2026-08-03.md': dayFile('2026-08-03', [], { lastCheckIn: '09:00' }) },
+  });
+
+  await page.fill('#task-input', 'Keep working');
+  await page.press('#task-input', 'Enter');
+  await page.fill('#task-input', 'Finish this one');
+  await page.press('#task-input', 'Enter');
+
+  const titles = page.locator('.task-title');
+  await expect(titles).toHaveText(['Keep working', 'Finish this one']);
+
+  await page.locator('.task').first().locator('.task-toggle').click();
+  await expect(page.locator('.task').first()).toHaveClass(/is-in-progress/);
+  await page.locator('.task').first().locator('.task-toggle').click();
+  await expect(titles).toHaveText(['Finish this one', 'Keep working']);
+  await expect(page.locator('.task').last()).toHaveClass(/is-completed/);
 });
 
 test('removes a task', async ({ page }) => {
@@ -262,7 +307,6 @@ test('refreshes the rollup on an ordinary check-in, not only at day-end', async 
   await page.fill('#task-input', 'Mid-afternoon work');
   await page.press('#task-input', 'Enter');
   await page.locator('.task-toggle').first().click();
-  await page.locator('.task-toggle').first().click();
   await page.click('#done');
 
   expect(await readVaultFile(page, '2026-W32.md')).toContain('Mid-afternoon work');
@@ -280,7 +324,6 @@ test('writes a weekly rollup when the day is wrapped up', async ({ page }) => {
 
   await page.fill('#task-input', 'Shipped it');
   await page.press('#task-input', 'Enter');
-  await page.locator('.task-toggle').first().click();
   await page.locator('.task-toggle').first().click();
 
   await page.click('#done');

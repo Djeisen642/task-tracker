@@ -22,6 +22,14 @@ fn set_tray_status(status: String, item: tauri::State<'_, StatusMenuItem>) -> Re
     item.0.set_text(status).map_err(|err| err.to_string())
 }
 
+/// Park the check-in card on the largest connected display, or the OS primary
+/// ("main") monitor when enumeration fails.
+#[tauri::command]
+fn position_checkin(window: WebviewWindow) -> Result<(), String> {
+    position_top_left(&window);
+    Ok(())
+}
+
 /// Ask the OS to draw attention to the window.
 ///
 /// Windows will not let an arbitrary background process take the foreground:
@@ -51,6 +59,7 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![
             set_tray_status,
+            position_checkin,
             request_attention,
             vault::vault_dir,
             vault::vault_set_dir,
@@ -151,15 +160,9 @@ pub fn run() {
 /// Inset from the monitor edge, in physical pixels.
 const MARGIN: i32 = 24;
 
-/// Anchor the window against the top-left corner of the largest connected
-/// monitor (by pixel area), not whichever display the window happens to report
-/// as "current" — on a fresh launch that's an arbitrary primary display, which
-/// on a multi-monitor setup is often the smaller one.
+/// Anchor the window against the top-left corner of the best available display.
 fn position_top_left<R: Runtime>(window: &tauri::WebviewWindow<R>) {
-    // Fall back to `current_monitor` if enumeration fails or reports nothing,
-    // rather than leaving the window wherever it was created.
-    let monitor = largest_monitor(window).or_else(|| window.current_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
+    let Some(monitor) = target_monitor(window) else {
         return;
     };
 
@@ -172,6 +175,14 @@ fn position_top_left<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     ));
 }
 
+/// Largest display first (often the external monitor), then the OS primary
+/// ("main" monitor), then whatever display currently owns the window.
+fn target_monitor<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Option<tauri::Monitor> {
+    largest_monitor(window)
+        .or_else(|| window.primary_monitor().ok().flatten())
+        .or_else(|| window.current_monitor().ok().flatten())
+}
+
 /// Pick the connected monitor with the greatest pixel area (width × height).
 ///
 /// On a tie (two identical monitors), `max_by_key` returns the *last* maximal
@@ -181,8 +192,9 @@ fn position_top_left<R: Runtime>(window: &tauri::WebviewWindow<R>) {
 /// swap displays.
 fn largest_monitor<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Option<tauri::Monitor> {
     let monitors = window.available_monitors().ok()?;
-    monitors.into_iter().max_by_key(|monitor| {
-        let size = monitor.size();
-        u64::from(size.width) * u64::from(size.height)
-    })
+    monitors.into_iter().max_by_key(|monitor| monitor_pixel_area(monitor.size()))
+}
+
+fn monitor_pixel_area(size: &tauri::PhysicalSize<u32>) -> u64 {
+    u64::from(size.width) * u64::from(size.height)
 }
