@@ -168,7 +168,7 @@ body {
 
 .task {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 9px;
   padding: 7px 9px;
   border-radius: var(--radius-sm);
@@ -185,6 +185,7 @@ body {
   place-items: center;
   width: 17px;
   height: 17px;
+  margin-top: 2px;
   padding: 0;
   font-size: 10px;
   line-height: 1;
@@ -227,9 +228,8 @@ body {
 .task-title {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .task.is-completed .task-title {
@@ -247,6 +247,7 @@ body {
 
 .task-remove {
   flex: none;
+  margin-top: 1px;
   padding: 0 4px;
   font-size: 15px;
   line-height: 1;

@@ -43,8 +43,13 @@ export async function showCheckIn(): Promise<void> {
 export async function showWindow(): Promise<void> {
   if (!isTauri()) return;
 
+  const { invoke } = await import('@tauri-apps/api/core');
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
   const win = getCurrentWindow();
+
+  // Position before show: on a multi-monitor setup the window can otherwise land
+  // on the small primary display (laptop) instead of the largest screen.
+  await invoke('position_checkin');
   await win.show();
   await win.setFocus();
 }
