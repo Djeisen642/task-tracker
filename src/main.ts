@@ -21,7 +21,9 @@ import { CONTEXT_DOC, CONTEXT_FILENAME } from './lib/markdown/context-doc.ts';
 import { standupSummary, weeklyRollup, weekFileName } from './lib/markdown/rollup.ts';
 import {
   describeCheckIn,
+  describeNextWorkingDay,
   dueCheckIn,
+  endsWorkingWeek,
   INITIAL_CHECK_IN_STATE,
   markHandled,
   onDemandSlot,
@@ -634,7 +636,7 @@ class CheckInController {
     const slot = this.slot;
     if (day === null || slot === null) return;
 
-    this.elements.headline.textContent = describeCheckIn(slot.kind);
+    this.elements.headline.textContent = describeCheckIn(slot.kind, this.endsWeek(slot));
     this.elements.subhead.textContent = this.describeProgress(day, slot);
 
     const previouslyCompleted =
@@ -654,10 +656,34 @@ class CheckInController {
     }
 
     if (slot.kind === 'day-end') {
-      return `${String(summary.completed)} done, ${String(summary.open)} still open — plan tomorrow?`;
+      // "plan tomorrow?" is wrong on the last working day of the week, which is
+      // exactly the wrap-up that matters most — those leftovers sit until Monday.
+      //
+      // "open" rather than "still open" because a weekday name is longer than
+      // "tomorrow" and this line has one card header to live in. It also matches
+      // the wording of the tray status.
+      const next = describeNextWorkingDay(this.slotDate(slot), this.settings);
+      return `${String(summary.completed)} done, ${String(summary.open)} open — plan ${next}?`;
     }
 
     return `${String(summary.completed)} of ${String(summary.total)} done`;
+  }
+
+  /**
+   * The calendar date a slot belongs to.
+   *
+   * Derived from the slot rather than from `new Date()` because the day-end slot
+   * stays outstanding all evening: at 00:20 the wall clock has rolled over, and
+   * "plan tomorrow?" against the wrong date would offer to plan the day you are
+   * already standing in. Falls back to now if the key is somehow unparseable.
+   */
+  private slotDate(slot: CheckInSlot): Date {
+    return fromDateKey(slot.date) ?? new Date();
+  }
+
+  /** `true` when this slot's day is the last working day of its week. */
+  private endsWeek(slot: CheckInSlot): boolean {
+    return endsWorkingWeek(this.slotDate(slot), this.settings);
   }
 
   /**

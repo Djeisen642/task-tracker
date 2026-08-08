@@ -98,3 +98,26 @@ test('capture: the end-of-day wrap-up', async ({ page }) => {
   await settle(page);
   await page.screenshot({ path: `${SHOTS}/day-end.png` });
 });
+
+test('capture: the last wrap-up of the week', async ({ page }) => {
+  // 2026-08-07 is a Friday. The one shot where the weekend is visible in the
+  // copy — the headline and the day it hands off to both change.
+  await startApp(page, {
+    now: new Date(2026, 7, 7, 17, 15),
+    files: {
+      '2026-08-07.md': dayFile(
+        '2026-08-07',
+        [
+          { title: 'Ship the rollback path', marker: 'x' },
+          { title: 'Draft the migration RFC', marker: '/' },
+          { title: 'Review the release checklist', marker: ' ' },
+        ],
+        { lastCheckIn: '16:00' },
+      ),
+    },
+  });
+
+  await expect(page.locator('#headline')).toHaveText('Wrapping up the week');
+  await settle(page);
+  await page.screenshot({ path: `${SHOTS}/week-end.png` });
+});

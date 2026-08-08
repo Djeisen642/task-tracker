@@ -106,6 +106,11 @@ weekend flag — a Tuesday-to-Saturday shift or a four-day week is just a differ
 list. Monday still inherits Friday's unfinished work: carry-over looks back up to
 four calendar days, which spans a weekend and a long weekend.
 
+The wording follows the same list. The last wrap-up before your longest break
+reads **"Wrapping up the week"** and asks you to plan **Monday** rather than
+"tomorrow" — which, on a Friday, would be a Saturday you weren't going to work.
+For a Sunday-to-Thursday week that day is Thursday, and the hand-off is Sunday.
+
 You can always check in outside the schedule from the tray, including on a day
 off.
 

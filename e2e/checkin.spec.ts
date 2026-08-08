@@ -59,11 +59,11 @@ test('cycles a task through its three states', async ({ page }) => {
 
   await task.locator('.task-toggle').click();
   await expect(task).toHaveClass(/is-completed/);
-  await expect(page.locator('#subhead')).toHaveText('1 done, 0 still open — plan tomorrow?');
+  await expect(page.locator('#subhead')).toHaveText('1 done, 0 open — plan tomorrow?');
 
   await task.locator('.task-toggle').click();
   await expect(task).not.toHaveClass(/is-in-progress|is-completed/);
-  await expect(page.locator('#subhead')).toHaveText('0 done, 1 still open — plan tomorrow?');
+  await expect(page.locator('#subhead')).toHaveText('0 done, 1 open — plan tomorrow?');
 });
 
 test('hides completed tasks on the next hourly check-in', async ({ page }) => {
@@ -317,6 +317,39 @@ test('asks for the wrap-up after the work day ends', async ({ page }) => {
 
   await expect(page.locator('#card')).toHaveClass(/is-open/);
   await expect(page.locator('#headline')).toHaveText('Wrapping up');
+});
+
+test("Friday's wrap-up plans Monday, not a Saturday nobody works", async ({ page }) => {
+  // 2026-08-07 is a Friday. The unit suite proves the arithmetic; this proves
+  // the controller actually asks the scheduler instead of hard-coding the word.
+  await startApp(page, { now: new Date(2026, 7, 7, 17, 30) });
+
+  await expect(page.locator('#headline')).toHaveText('Wrapping up the week');
+  await expect(page.locator('#subhead')).toHaveText('0 done, 0 open — plan Monday?');
+});
+
+test('a shifted week ends on its own last day', async ({ page }) => {
+  // Sunday-to-Thursday: Thursday 2026-08-06 is the wrap-up that matters, and
+  // the day it hands off to is Sunday.
+  await startApp(page, {
+    now: new Date(2026, 7, 6, 17, 30),
+    settings: { workDays: [0, 1, 2, 3, 4] },
+  });
+
+  await expect(page.locator('#headline')).toHaveText('Wrapping up the week');
+  await expect(page.locator('#subhead')).toContainText('plan Sunday?');
+});
+
+test('a mid-week wrap-up stays an ordinary wrap-up', async ({ page }) => {
+  // Wednesdays off. Tuesday is followed by a day off but is not the end of the
+  // week — the headline must not claim otherwise.
+  await startApp(page, {
+    now: new Date(2026, 7, 4, 17, 30),
+    settings: { workDays: [1, 2, 4, 5] },
+  });
+
+  await expect(page.locator('#headline')).toHaveText('Wrapping up');
+  await expect(page.locator('#subhead')).toContainText('plan Thursday?');
 });
 
 test('writes a weekly rollup when the day is wrapped up', async ({ page }) => {

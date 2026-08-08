@@ -132,9 +132,16 @@
           <p class="field-hint">The day's opener and wrap-up always run.</p>
         </div>
 
+        <!--
+          The one field whose label reads as a sentence with its control, so it
+          shares the row instead of taking a section heading of its own. That
+          also buys back the ~19px of height that pushed the panel into a
+          scrollbar on platforms whose native time inputs are taller than
+          Chromium's.
+        -->
         <div class="field">
-          <label class="field-label" for="snooze-minutes">Snooze for</label>
           <div class="field-row">
+            <label class="field-joiner" for="snooze-minutes">Snooze for</label>
             <input
               id="snooze-minutes"
               class="entry-input number-input"

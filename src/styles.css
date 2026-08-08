@@ -479,12 +479,22 @@ body {
    * Tight on purpose. The window is a fixed 470px and this panel has six
    * fields; at 13px gaps the content came to ~467px and clipped the last
    * control against the footer. It still scrolls if a platform's native
-   * controls are taller than Chromium's.
+   * controls are taller than Chromium's — see the gutter below.
    */
   gap: 11px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--edge) transparent;
+  /*
+   * Reserve the scrollbar's width on *both* sides, always.
+   *
+   * Without this the scrollbar is drawn inside the panel's right-hand padding
+   * and steals it from the content, so the fields sit ~11px closer to the left
+   * edge than the right — the panel reads as misaligned rather than as scrolled.
+   * `stable` keeps the gutter even when nothing overflows, so the layout doesn't
+   * jump between a platform whose native time input fits and one whose doesn't.
+   */
+  scrollbar-gutter: stable both-edges;
 }
 
 .field {
@@ -510,6 +520,12 @@ body {
 .field-joiner {
   font-size: 12.5px;
   color: var(--ink-dim);
+}
+
+/* The joiner is usually a bare span; when it's the snooze field's label it also
+   has to behave like one. */
+label.field-joiner {
+  cursor: pointer;
 }
 
 .field-hint {
