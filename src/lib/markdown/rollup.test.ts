@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { addNote, createDay, type DayDocument } from './day.ts';
-import { collectKudos, standupSummary, weeklyRollup, weekFileName } from './rollup.ts';
+import {
+  agentWeekBriefing,
+  collectKudos,
+  standupSummary,
+  weeklyRollup,
+  weekFileName,
+} from './rollup.ts';
 
 function day(date: string, tasks: DayDocument['tasks'], notes: [string, string][] = []) {
   let doc = createDay(date, '09:00', '17:00', tasks);
@@ -171,5 +177,53 @@ describe('weekFileName', () => {
 
   it('returns null for a malformed date', () => {
     expect(weekFileName('nope')).toBeNull();
+  });
+});
+
+describe('agentWeekBriefing', () => {
+  const days = [
+    day(
+      '2026-08-03',
+      [
+        { title: 'Ship the rollback', status: 'completed' },
+        { title: 'Draft the RFC', status: 'in-progress' },
+      ],
+      [['10:00', '@alice saved the release #kudos']],
+    ),
+    day('2026-08-04', [{ title: 'Draft the RFC', status: 'in-progress' }]),
+  ];
+
+  it('carries the week itself', () => {
+    const briefing = agentWeekBriefing(days);
+    expect(briefing).toContain('# Week 2026-W32');
+    expect(briefing).toContain('Ship the rollback');
+    expect(briefing).toContain('Draft the RFC');
+    expect(briefing).toContain('@alice saved the release #kudos');
+  });
+
+  it('carries its own schema key, since the reader never sees CONTEXT.md', () => {
+    // The whole point: this is pasted into a chat, not read next to the vault.
+    const briefing = agentWeekBriefing(days) ?? '';
+    expect(briefing).toContain('`@name` is a colleague');
+    expect(briefing).toContain('#kudos');
+    expect(briefing).toContain('#blocker');
+    expect(briefing).toContain('#decision');
+  });
+
+  it('warns off the two readings an agent gets wrong', () => {
+    const briefing = agentWeekBriefing(days) ?? '';
+    expect(briefing).toContain('not work that was abandoned');
+    expect(briefing).toContain('not that nothing happened');
+  });
+
+  it('puts the preamble before the rollup, not after it', () => {
+    const briefing = agentWeekBriefing(days) ?? '';
+    expect(briefing.indexOf('Conventions:')).toBeLessThan(briefing.indexOf('# Week'));
+  });
+
+  it('returns null for a week with nothing logged', () => {
+    // A briefing whose body is three "Nothing" bullets looks authoritative and
+    // says nothing, which is worse than the app admitting it has nothing.
+    expect(agentWeekBriefing([])).toBeNull();
   });
 });

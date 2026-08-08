@@ -158,6 +158,11 @@ export function onStandupRequested(handler: () => void): Promise<void> {
   return onTrayEvent('copy-standup', handler);
 }
 
+/** Tray "Copy week for an agent". */
+export function onWeekRequested(handler: () => void): Promise<void> {
+  return onTrayEvent('copy-week', handler);
+}
+
 /** Tray "Open vault folder". */
 export function onOpenVaultRequested(handler: () => void): Promise<void> {
   return onTrayEvent('open-vault', handler);

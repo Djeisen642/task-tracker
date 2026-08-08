@@ -222,6 +222,43 @@ test('copies a standup summary to the clipboard', async ({ page }) => {
   expect(clipboard).toContain('Today’s work');
 });
 
+test('copies the week to the clipboard, framed for an agent', async ({ page }) => {
+  // Monday 2026-08-03 and Tuesday 2026-08-04 are the same ISO week, so both
+  // land in the briefing — this is the assertion that it reads a *week* off
+  // disk rather than whatever the open card happens to hold.
+  await startApp(page, {
+    now: new Date(2026, 7, 4, 10, 30),
+    files: {
+      '2026-08-03.md': dayFile('2026-08-03', [{ title: 'Shipped on Monday', marker: 'x' }]),
+      '2026-08-04.md': dayFile('2026-08-04', [{ title: 'Still going on Tuesday', marker: '/' }], {
+        lastCheckIn: '09:00',
+      }),
+    },
+  });
+
+  await page.evaluate(() => {
+    document.getElementById('copy-week')?.click();
+  });
+  await expect(page.locator('#status')).toHaveClass(/is-visible/);
+
+  const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clipboard).toContain('# Week 2026-W32');
+  expect(clipboard).toContain('Shipped on Monday');
+  expect(clipboard).toContain('Still going on Tuesday');
+  // The schema key that makes it stand alone in a chat.
+  expect(clipboard).toContain('`@name` is a colleague');
+});
+
+test('says so rather than copying an empty week', async ({ page }) => {
+  await startApp(page, { now: new Date(2026, 7, 4, 10, 30) });
+
+  await page.evaluate(() => {
+    document.getElementById('copy-week')?.click();
+  });
+
+  await expect(page.locator('#status')).toHaveText('No entries this week');
+});
+
 test('renders task titles as text, never as markup', async ({ page }) => {
   // Vault content round-trips through files other tools can write.
   await startApp(page);

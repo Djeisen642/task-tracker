@@ -71,7 +71,27 @@
 
       <footer class="card-foot">
         <button id="done" class="primary-button" type="button">Done</button>
-        <button id="copy-standup" class="ghost-button" type="button">Copy standup</button>
+        <button
+          id="copy-standup"
+          class="ghost-button"
+          type="button"
+          title="Yesterday, today and blockers — for standup"
+        >
+          Standup
+        </button>
+        <!--
+          The vault is already agent-readable, so this is not for someone who has
+          the folder. It carries its own schema key so it stands alone when
+          pasted into a chat with an agent that can't see the files.
+        -->
+        <button
+          id="copy-week"
+          class="ghost-button"
+          type="button"
+          title="This week, framed for an agent"
+        >
+          Week
+        </button>
         <span id="status" class="status" role="status"></span>
       </footer>
     </main>

@@ -88,6 +88,11 @@ pub fn run() {
                 MenuItem::with_id(app, "check_in", "Check in now", true, None::<&str>)?;
             let standup_item =
                 MenuItem::with_id(app, "standup", "Copy standup summary", true, None::<&str>)?;
+            // Distinct from the standup: that one is for a human in a chat box,
+            // this one carries its own schema key for an agent that will never
+            // see the vault's CONTEXT.md.
+            let week_item =
+                MenuItem::with_id(app, "week", "Copy week for an agent", true, None::<&str>)?;
             let vault_item =
                 MenuItem::with_id(app, "vault", "Open vault folder", true, None::<&str>)?;
             let settings_item =
@@ -101,6 +106,7 @@ pub fn run() {
                     &separator,
                     &check_in_item,
                     &standup_item,
+                    &week_item,
                     &vault_item,
                     &settings_item,
                     &quit_item,
@@ -121,6 +127,9 @@ pub fn run() {
                     }
                     "standup" => {
                         let _ = app.emit("copy-standup", ());
+                    }
+                    "week" => {
+                        let _ = app.emit("copy-week", ());
                     }
                     "vault" => {
                         let _ = app.emit("open-vault", ());
@@ -192,7 +201,9 @@ fn target_monitor<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Option<tauri:
 /// swap displays.
 fn largest_monitor<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Option<tauri::Monitor> {
     let monitors = window.available_monitors().ok()?;
-    monitors.into_iter().max_by_key(|monitor| monitor_pixel_area(monitor.size()))
+    monitors
+        .into_iter()
+        .max_by_key(|monitor| monitor_pixel_area(monitor.size()))
 }
 
 fn monitor_pixel_area(size: &tauri::PhysicalSize<u32>) -> u64 {

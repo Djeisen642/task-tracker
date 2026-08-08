@@ -135,6 +135,12 @@ docs/
   app must survive reboots, Windows updates and its own crashes mid-workday;
   without this it relaunches believing nothing was handled and re-prompts for a
   check-in the user already completed. A snooze is deliberately _not_ restored.
+- **The clipboard briefing carries its own schema; `CONTEXT.md` does not travel.**
+  `agentWeekBriefing` prepends the notation key to the weekly rollup because it
+  is pasted into a chat with an agent that will never see the vault. That is also
+  why it returns `null` for an empty week rather than a body of "Nothing" bullets
+  — those read as authoritative and say nothing. Don't collapse it into
+  `weeklyRollup`, whose output lands _in_ the folder next to the guide.
 - **The Markdown is the source of truth.** Not a cache, not an export. If a
   SQLite index is ever added it must be _derived_ and rebuildable — never written
   before the Markdown. See `docs/future-work.md`.

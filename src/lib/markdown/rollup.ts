@@ -149,3 +149,41 @@ export function weekFileName(date: DateKey): string | null {
   const parsed = fromDateKey(date);
   return parsed === null ? null : `${toWeekKey(parsed)}.md`;
 }
+
+/**
+ * The week's rollup with enough preamble to hand to an agent that cannot see
+ * the vault.
+ *
+ * `CONTEXT.md` already explains the conventions, but it explains them *to a
+ * reader of the folder*. This text exists for the opposite situation: it is
+ * pasted into a chat with an agent that has no filesystem access and will never
+ * see `CONTEXT.md`, so it has to carry its own key. Hence the preamble — and
+ * hence the two disclaimers, which are the mistakes an agent reliably makes on
+ * this data: reading a gap as "nothing happened" and reading "still open" as
+ * "abandoned".
+ *
+ * Returns `null` for a week with no logged days. A briefing whose body is three
+ * "Nothing" bullets tells an agent nothing while looking authoritative, and
+ * that's worse than the app saying it has nothing to give you.
+ */
+export function agentWeekBriefing(days: readonly DayDocument[]): string | null {
+  if (days.length === 0) return null;
+
+  return [
+    'Below is one week from a work journal kept by Task Tracker, a desktop app that',
+    "prompts its user hourly to record what they're working on. It is the raw record,",
+    'not a summary written afterwards.',
+    '',
+    'Conventions: `@name` is a colleague. `#tag` is a freeform label — `#kudos` marks a',
+    'moment worth remembering at review time, `#blocker` something impeding progress,',
+    '`#decision` a decision and its reasoning.',
+    '',
+    'Two things not to misread: "Still open" is the state at the end of the last logged',
+    'day, not work that was abandoned; and a day with no entry means nothing was logged,',
+    'not that nothing happened.',
+    '',
+    '---',
+    '',
+    weeklyRollup(days),
+  ].join('\n');
+}
