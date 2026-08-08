@@ -106,6 +106,11 @@ weekend flag — a Tuesday-to-Saturday shift or a four-day week is just a differ
 list. Monday still inherits Friday's unfinished work: carry-over looks back up to
 four calendar days, which spans a weekend and a long weekend.
 
+The wording follows the same list. The last wrap-up before your longest break
+reads **"Wrapping up the week"** and asks you to plan **Monday** rather than
+"tomorrow" — which, on a Friday, would be a Saturday you weren't going to work.
+For a Sunday-to-Thursday week that day is Thursday, and the hand-off is Sunday.
+
 You can always check in outside the schedule from the tray, including on a day
 off.
 
@@ -115,8 +120,23 @@ off.
 - **Check in now** — open the card outside the schedule.
 - **Copy standup summary** — yesterday's completed work, today's open items and
   any `#blocker` notes, on the clipboard and ready to paste.
+- **Copy week for an agent** — this week's completed work, still-open items and
+  kudos, with a short preamble explaining the notation.
 - **Open vault folder**
 - **Quit**
+
+Both copy actions are also buttons on the check-in card, as **Standup** and
+**Week**.
+
+### Handing a week to an agent
+
+The vault is already agent-readable — point a coding agent at the folder and
+`CONTEXT.md` tells it what the markers mean. **Copy week** is for the case where
+it can't see the folder: pasting into a chat. So the copied text carries its own
+key — what `@name` and `#kudos` mean, that "still open" is a snapshot rather than
+abandoned work, and that a missing day means nothing was logged rather than that
+nothing happened. It's the one output designed to be read with no vault in front
+of you.
 
 ## Verifying it works
 

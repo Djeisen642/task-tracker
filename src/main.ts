@@ -18,10 +18,17 @@ import { addDays, fromDateKey, startOfIsoWeek, toClock, toDateKey } from './lib/
 import { describeError } from './lib/errors.ts';
 import { addNote, type DayDocument } from './lib/markdown/day.ts';
 import { CONTEXT_DOC, CONTEXT_FILENAME } from './lib/markdown/context-doc.ts';
-import { standupSummary, weeklyRollup, weekFileName } from './lib/markdown/rollup.ts';
+import {
+  agentWeekBriefing,
+  standupSummary,
+  weeklyRollup,
+  weekFileName,
+} from './lib/markdown/rollup.ts';
 import {
   describeCheckIn,
+  describeNextWorkingDay,
   dueCheckIn,
+  endsWorkingWeek,
   INITIAL_CHECK_IN_STATE,
   markHandled,
   onDemandSlot,
@@ -66,6 +73,7 @@ import {
   onOpenVaultRequested,
   onSettingsRequested,
   onStandupRequested,
+  onWeekRequested,
   openVaultFolder,
   saveSettingsJson,
   setAutostart,
@@ -101,6 +109,7 @@ interface Elements {
   done: HTMLButtonElement;
   snooze: HTMLButtonElement;
   copyStandup: HTMLButtonElement;
+  copyWeek: HTMLButtonElement;
   status: HTMLElement;
   settings: SettingsElements;
 }
@@ -143,6 +152,7 @@ function resolveElements(): Elements {
     done: mustGet<HTMLButtonElement>('done'),
     snooze: mustGet<HTMLButtonElement>('snooze'),
     copyStandup: mustGet<HTMLButtonElement>('copy-standup'),
+    copyWeek: mustGet<HTMLButtonElement>('copy-week'),
     status: mustGet('status'),
     settings: {
       panel: mustGet('settings'),
@@ -229,6 +239,10 @@ class CheckInController {
 
     this.elements.copyStandup.addEventListener('click', () => {
       void this.copyStandup();
+    });
+
+    this.elements.copyWeek.addEventListener('click', () => {
+      void this.copyWeek();
     });
 
     this.bindSettingsEvents();
@@ -357,6 +371,9 @@ class CheckInController {
     });
     await onStandupRequested(() => {
       void this.copyStandup();
+    });
+    await onWeekRequested(() => {
+      void this.copyWeek();
     });
     await onOpenVaultRequested(() => {
       void openVaultFolder();
@@ -634,7 +651,7 @@ class CheckInController {
     const slot = this.slot;
     if (day === null || slot === null) return;
 
-    this.elements.headline.textContent = describeCheckIn(slot.kind);
+    this.elements.headline.textContent = describeCheckIn(slot.kind, this.endsWeek(slot));
     this.elements.subhead.textContent = this.describeProgress(day, slot);
 
     const previouslyCompleted =
@@ -654,10 +671,34 @@ class CheckInController {
     }
 
     if (slot.kind === 'day-end') {
-      return `${String(summary.completed)} done, ${String(summary.open)} still open — plan tomorrow?`;
+      // "plan tomorrow?" is wrong on the last working day of the week, which is
+      // exactly the wrap-up that matters most — those leftovers sit until Monday.
+      //
+      // "open" rather than "still open" because a weekday name is longer than
+      // "tomorrow" and this line has one card header to live in. It also matches
+      // the wording of the tray status.
+      const next = describeNextWorkingDay(this.slotDate(slot), this.settings);
+      return `${String(summary.completed)} done, ${String(summary.open)} open — plan ${next}?`;
     }
 
     return `${String(summary.completed)} of ${String(summary.total)} done`;
+  }
+
+  /**
+   * The calendar date a slot belongs to.
+   *
+   * Derived from the slot rather than from `new Date()` because the day-end slot
+   * stays outstanding all evening: at 00:20 the wall clock has rolled over, and
+   * "plan tomorrow?" against the wrong date would offer to plan the day you are
+   * already standing in. Falls back to now if the key is somehow unparseable.
+   */
+  private slotDate(slot: CheckInSlot): Date {
+    return fromDateKey(slot.date) ?? new Date();
+  }
+
+  /** `true` when this slot's day is the last working day of its week. */
+  private endsWeek(slot: CheckInSlot): boolean {
+    return endsWorkingWeek(this.slotDate(slot), this.settings);
   }
 
   /**
@@ -823,6 +864,23 @@ class CheckInController {
     }
   }
 
+  /**
+   * Every logged day of the ISO week containing `date`, ascending.
+   *
+   * Shared by the rollup writer and the clipboard briefing so the two can never
+   * disagree about where a week starts.
+   */
+  private async daysOfWeek(date: Date): Promise<DayDocument[]> {
+    const monday = startOfIsoWeek(date);
+    return await readDayRange(
+      this.vault,
+      toDateKey(monday),
+      toDateKey(addDays(monday, 6)),
+      this.settings.workStart,
+      this.settings.workEnd,
+    );
+  }
+
   /** Regenerate the rollup file for the ISO week containing `date`. */
   private async writeRollupForWeekOf(date: string): Promise<void> {
     const name = weekFileName(date);
@@ -832,18 +890,35 @@ class CheckInController {
     if (slotDate === null) return;
 
     try {
-      const monday = startOfIsoWeek(slotDate);
-      const days = await readDayRange(
-        this.vault,
-        toDateKey(monday),
-        toDateKey(addDays(monday, 6)),
-        this.settings.workStart,
-        this.settings.workEnd,
-      );
-      await this.vault.write(name, weeklyRollup(days));
+      await this.vault.write(name, weeklyRollup(await this.daysOfWeek(slotDate)));
     } catch (error) {
       // A rollup is derived data — never let it take down the check-in.
       console.warn('Could not write the weekly rollup:', describeError(error));
+    }
+  }
+
+  /**
+   * Copy this week to the clipboard, framed for an agent that can't see the
+   * vault.
+   *
+   * The vault is already agent-readable, so this is not for someone with the
+   * folder in front of them — it's for pasting into a chat. It reads from disk
+   * rather than from the open card because a week is more than today, and it
+   * deliberately reports rather than silently copying nothing when the week is
+   * empty.
+   */
+  private async copyWeek(): Promise<void> {
+    try {
+      const briefing = agentWeekBriefing(await this.daysOfWeek(new Date()));
+      if (briefing === null) {
+        this.setStatus('No entries this week');
+        return;
+      }
+
+      await copyToClipboard(briefing);
+      this.setStatus('Week copied');
+    } catch (error) {
+      await showError('Could not copy your week', describeError(error));
     }
   }
 

@@ -114,6 +114,18 @@ docs/
   `Date.getDay()` numbers, because "the weekend" is Friday/Saturday in much of
   the world and plenty of people work four days or Tuesday-to-Saturday. Parsing
   still understands the superseded `includeWeekends` boolean.
+- **The copy has to know about the weekend too, not just the scheduler.** The
+  wrap-up asks you to plan `describeNextWorkingDay(…)` — "tomorrow" midweek,
+  "Monday" on a Friday. Asked on a Friday to "plan tomorrow" you either plan a
+  Saturday you won't work or you ignore the prompt, and the point of the day-end
+  check-in is that the next working morning opens with a list already on it.
+- **"The end of the week" is the longest gap in `workDays`, not an ISO
+  boundary.** `endsWorkingWeek` is what upgrades the headline to "Wrapping up the
+  week". Comparing ISO weeks gets a Sunday-to-Thursday week exactly backwards
+  (Thursday and the following Sunday share an ISO week, so the label lands on the
+  day the week _starts_), and "the next working day isn't tomorrow" fires every
+  Tuesday for someone who takes Wednesdays off. The longest gap is right for all
+  four shapes.
 - **Weekly rollups are derived and self-healing.** They refresh on every check-in
   and, on the first check-in of a new week, rebuild the previous week too. Written
   only at `day-end`, a week whose last working day never got a wrap-up produced no
@@ -123,6 +135,12 @@ docs/
   app must survive reboots, Windows updates and its own crashes mid-workday;
   without this it relaunches believing nothing was handled and re-prompts for a
   check-in the user already completed. A snooze is deliberately _not_ restored.
+- **The clipboard briefing carries its own schema; `CONTEXT.md` does not travel.**
+  `agentWeekBriefing` prepends the notation key to the weekly rollup because it
+  is pasted into a chat with an agent that will never see the vault. That is also
+  why it returns `null` for an empty week rather than a body of "Nothing" bullets
+  — those read as authoritative and say nothing. Don't collapse it into
+  `weeklyRollup`, whose output lands _in_ the folder next to the guide.
 - **The Markdown is the source of truth.** Not a cache, not an export. If a
   SQLite index is ever added it must be _derived_ and rebuildable — never written
   before the Markdown. See `docs/future-work.md`.
@@ -160,6 +178,12 @@ docs/
   CSS import injects a `<style>` tag in dev, which the app's `style-src 'self'`
   CSP blocks. That breaks only in the desktop webview — never in lint, tests, or
   a browser `npm run dev`.
+- **The settings panel reserves its scrollbar gutter on both edges.** A scrollbar
+  drawn inside the panel's right-hand padding steals it from the content, so the
+  fields sit ~11px closer to the left edge than the right and the panel reads as
+  misaligned. `scrollbar-gutter: stable both-edges` keeps it symmetric whether or
+  not it scrolls — which matters because whether it scrolls depends on how tall
+  the platform paints `type="time"`, and Chromium is not the platform that ships.
 - **Giving an element a `display` also overrides `[hidden]`.** `.settings` is a
   flex column, so it needs an explicit `.settings[hidden] { display: none }` —
   without it the panel is on screen permanently, covering the card, and the app
