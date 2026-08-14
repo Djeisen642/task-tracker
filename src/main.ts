@@ -18,12 +18,17 @@ import { addDays, fromDateKey, startOfIsoWeek, toClock, toDateKey } from './lib/
 import { describeError } from './lib/errors.ts';
 import { addNote, type DayDocument } from './lib/markdown/day.ts';
 import { CONTEXT_DOC, CONTEXT_FILENAME } from './lib/markdown/context-doc.ts';
+import { extractPeople } from './lib/markdown/mentions.ts';
 import {
   agentWeekBriefing,
   standupSummary,
+  teamWeekBriefing,
+  teamWeeklyRollup,
+  teamWeekFileName,
   weeklyRollup,
   weekFileName,
 } from './lib/markdown/rollup.ts';
+import { addTeamNote, type TeamMemberDocument } from './lib/markdown/team.ts';
 import {
   describeCheckIn,
   describeNextWorkingDay,
@@ -73,6 +78,8 @@ import {
   onOpenVaultRequested,
   onSettingsRequested,
   onStandupRequested,
+  onTeamRequested,
+  onTeamWeekRequested,
   onWeekRequested,
   openVaultFolder,
   saveSettingsJson,
@@ -84,12 +91,17 @@ import {
   vaultPath,
 } from './lib/tauri.ts';
 import {
+  isPersonHandle,
+  listTeamPeople,
   openDay,
+  openTeamMember,
   previousDayKey,
   listDayKeys,
   readDay,
   readDayRange,
+  readTeamMember,
   writeDay,
+  writeTeamMember,
   type VaultPort,
 } from './lib/vault.ts';
 
@@ -106,12 +118,15 @@ interface Elements {
   taskInput: HTMLInputElement;
   noteForm: HTMLFormElement;
   noteInput: HTMLInputElement;
+  teamDayEndForm: HTMLFormElement;
+  teamDayEndInput: HTMLInputElement;
   done: HTMLButtonElement;
   snooze: HTMLButtonElement;
   copyStandup: HTMLButtonElement;
   copyWeek: HTMLButtonElement;
   status: HTMLElement;
   settings: SettingsElements;
+  team: TeamElements;
 }
 
 interface SettingsElements {
@@ -123,12 +138,37 @@ interface SettingsElements {
   workDays: HTMLElement;
   hourlyEnabled: HTMLInputElement;
   snoozeMinutes: HTMLInputElement;
+  managerModeEnabled: HTMLInputElement;
   launchAtLogin: HTMLInputElement;
   vaultPath: HTMLElement;
   openVault: HTMLButtonElement;
   save: HTMLButtonElement;
   cancel: HTMLButtonElement;
   error: HTMLElement;
+}
+
+/**
+ * The Team panel's elements. A sibling overlay to Settings, reached the same
+ * two ways (the icon on the card, the tray item) and always available — see
+ * `Settings.managerModeEnabled` for why it isn't gated by that setting.
+ */
+interface TeamElements {
+  open: HTMLButtonElement;
+  panel: HTMLElement;
+  close: HTMLButtonElement;
+  personInput: HTMLInputElement;
+  personLoad: HTMLButtonElement;
+  personError: HTMLElement;
+  peopleList: HTMLDataListElement;
+  taskList: HTMLUListElement;
+  emptyState: HTMLElement;
+  taskForm: HTMLFormElement;
+  taskInput: HTMLInputElement;
+  noteForm: HTMLFormElement;
+  noteInput: HTMLInputElement;
+  notes: HTMLElement;
+  copyWeek: HTMLButtonElement;
+  status: HTMLElement;
 }
 
 /** Resolve a required element or fail loudly at startup. */
@@ -149,6 +189,8 @@ function resolveElements(): Elements {
     taskInput: mustGet<HTMLInputElement>('task-input'),
     noteForm: mustGet<HTMLFormElement>('note-form'),
     noteInput: mustGet<HTMLInputElement>('note-input'),
+    teamDayEndForm: mustGet<HTMLFormElement>('team-day-end-form'),
+    teamDayEndInput: mustGet<HTMLInputElement>('team-day-end-input'),
     done: mustGet<HTMLButtonElement>('done'),
     snooze: mustGet<HTMLButtonElement>('snooze'),
     copyStandup: mustGet<HTMLButtonElement>('copy-standup'),
@@ -163,6 +205,7 @@ function resolveElements(): Elements {
       workDays: mustGet('work-days'),
       hourlyEnabled: mustGet<HTMLInputElement>('hourly-enabled'),
       snoozeMinutes: mustGet<HTMLInputElement>('snooze-minutes'),
+      managerModeEnabled: mustGet<HTMLInputElement>('manager-mode-enabled'),
       launchAtLogin: mustGet<HTMLInputElement>('launch-at-login'),
       vaultPath: mustGet('vault-path'),
       openVault: mustGet<HTMLButtonElement>('open-vault'),
@@ -170,7 +213,75 @@ function resolveElements(): Elements {
       cancel: mustGet<HTMLButtonElement>('settings-cancel'),
       error: mustGet('settings-error'),
     },
+    team: {
+      open: mustGet<HTMLButtonElement>('team-open'),
+      panel: mustGet('team'),
+      close: mustGet<HTMLButtonElement>('team-close'),
+      personInput: mustGet<HTMLInputElement>('team-person-input'),
+      personLoad: mustGet<HTMLButtonElement>('team-person-load'),
+      personError: mustGet('team-person-error'),
+      peopleList: mustGet<HTMLDataListElement>('team-people-list'),
+      taskList: mustGet<HTMLUListElement>('team-task-list'),
+      emptyState: mustGet('team-empty-state'),
+      taskForm: mustGet<HTMLFormElement>('team-task-form'),
+      taskInput: mustGet<HTMLInputElement>('team-task-input'),
+      noteForm: mustGet<HTMLFormElement>('team-note-form'),
+      noteInput: mustGet<HTMLInputElement>('team-note-input'),
+      notes: mustGet('team-notes'),
+      copyWeek: mustGet<HTMLButtonElement>('team-copy-week'),
+      status: mustGet('team-status'),
+    },
   };
+}
+
+/**
+ * One task row: a status toggle, the title, and a remove button. Shared by
+ * the card's own task list and the Team panel's, which render the identical
+ * shape against two different underlying documents.
+ *
+ * Titles go in with `textContent`, never `innerHTML`. The text is the user's
+ * own, but it round-trips through a file on disk that other tools (and agents)
+ * can write — treating it as markup would be a standing XSS hole for the sake
+ * of nothing.
+ */
+function renderTaskRow(
+  task: Task,
+  options: { carried?: boolean; onToggle: () => void; onRemove: () => void },
+): HTMLLIElement {
+  const item = document.createElement('li');
+  item.className = 'task';
+  if (task.status === 'in-progress') item.classList.add('is-in-progress');
+  if (task.status === 'completed') item.classList.add('is-completed');
+  if (options.carried === true) item.classList.add('is-carried');
+
+  const glyphs: Record<Task['status'], string> = {
+    upcoming: '',
+    'in-progress': '•',
+    completed: '✓',
+  };
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'task-toggle';
+  toggle.textContent = glyphs[task.status];
+  toggle.title = `Mark ${cycleStatus(task.status).replace('-', ' ')}`;
+  toggle.setAttribute('aria-label', `${task.title} — ${task.status}`);
+  toggle.addEventListener('click', options.onToggle);
+
+  const title = document.createElement('span');
+  title.className = 'task-title';
+  title.textContent = task.title;
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'task-remove';
+  remove.textContent = '×';
+  remove.title = 'Remove task';
+  remove.setAttribute('aria-label', `Remove ${task.title}`);
+  remove.addEventListener('click', options.onRemove);
+
+  item.append(toggle, title, remove);
+  return item;
 }
 
 class CheckInController {
@@ -196,6 +307,13 @@ class CheckInController {
   private settingsStandalone = false;
   /** The working-day selection being edited, applied only on Save. */
   private draftWorkDays: number[] = [];
+  /** `true` while the Team panel is on screen. Mutually exclusive with Settings. */
+  private teamOpen = false;
+  /** Same bookkeeping as `settingsStandalone`, for the Team panel. */
+  private teamStandalone = false;
+  /** The report currently loaded in the Team panel, or `null` when none is. */
+  private teamMember: TeamMemberDocument | null = null;
+  private teamStatusTimer: number | undefined;
   /** Last text pushed to the tray, so identical updates aren't re-sent. */
   private lastTrayStatus: string | null = null;
   /**
@@ -245,23 +363,73 @@ class CheckInController {
       void this.copyWeek();
     });
 
+    this.elements.teamDayEndForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      void this.onAddTeamDayEndNote();
+    });
+
     this.bindSettingsEvents();
+    this.bindTeamEvents();
 
     // Esc snoozes; the card is a prompt, not a modal you have to defeat.
     document.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
 
-      // With the panel up, Esc belongs to the panel. Falling through to the
+      // With a panel up, Esc belongs to the panel. Falling through to the
       // snooze would dismiss a check-in the user never looked at — and, when
-      // settings were opened from the tray with nothing due, would snooze a slot
-      // that isn't even on screen.
+      // a panel was opened from the tray with nothing due, would snooze a slot
+      // that isn't even on screen. Team and Settings are mutually exclusive
+      // (see `openTeam`/`openSettings`), so checking both in sequence is safe.
+      if (this.teamOpen) {
+        void this.closeTeam();
+        return;
+      }
+
       if (this.settingsOpen) {
         void this.closeSettings();
         return;
       }
 
       void this.onSnooze();
+    });
+  }
+
+  private bindTeamEvents(): void {
+    const team = this.elements.team;
+
+    team.open.addEventListener('click', () => {
+      void this.openTeam();
+    });
+
+    team.close.addEventListener('click', () => {
+      void this.closeTeam();
+    });
+
+    team.personLoad.addEventListener('click', () => {
+      void this.loadTeamMember(team.personInput.value);
+    });
+
+    // Keyboard-first, like the rest of the app: no need to reach for the mouse
+    // to open a report you just typed.
+    team.personInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      void this.loadTeamMember(team.personInput.value);
+    });
+
+    team.taskForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.onAddTeamTask();
+    });
+
+    team.noteForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      this.onAddTeamNote();
+    });
+
+    team.copyWeek.addEventListener('click', () => {
+      void this.copyTeamWeek();
     });
   }
 
@@ -381,16 +549,22 @@ class CheckInController {
     await onSettingsRequested(() => {
       void this.openSettings();
     });
+    await onTeamRequested(() => {
+      void this.openTeam();
+    });
+    await onTeamWeekRequested(() => {
+      void this.copyTeamWeek();
+    });
   }
 
   /** The scheduler cadence: decide whether to interrupt, and do nothing if not. */
   private async tick(): Promise<void> {
-    // A due check-in must not land on top of the settings panel: the card would
-    // paint underneath an overlay the user is typing into, and Done/Esc would
-    // reach the wrong surface. The slot stays outstanding and is served as soon
-    // as the panel closes, which is exactly the coalescing behavior slots exist
-    // for — nothing is lost by waiting.
-    if (this.visible || this.settingsOpen) return;
+    // A due check-in must not land on top of an overlay: the card would paint
+    // underneath a panel the user is typing into, and Done/Esc would reach the
+    // wrong surface. The slot stays outstanding and is served as soon as the
+    // panel closes, which is exactly the coalescing behavior slots exist for —
+    // nothing is lost by waiting.
+    if (this.visible || this.settingsOpen || this.teamOpen) return;
 
     // Keep the tray honest even on the many ticks that don't prompt.
     await this.refreshTrayStatus();
@@ -413,7 +587,7 @@ class CheckInController {
    * animation and poll paths before adding a mutual-exclusion flag.
    */
   private async present(slot: CheckInSlot): Promise<void> {
-    if (this.presenting || this.settingsOpen) return;
+    if (this.presenting || this.settingsOpen || this.teamOpen) return;
     this.presenting = true;
 
     try {
@@ -466,7 +640,7 @@ class CheckInController {
    * because closing has to put things back the way it found them.
    */
   private async openSettings(): Promise<void> {
-    if (this.settingsOpen) return;
+    if (this.settingsOpen || this.teamOpen) return;
 
     this.settingsOpen = true;
     this.settingsStandalone = !this.visible;
@@ -568,6 +742,13 @@ class CheckInController {
 
     this.settings = next;
 
+    // A check-in already open behind the panel reads settings on every render
+    // (the day-end team step, the headline's "ends the week" framing, the
+    // wrap-up's next-working-day text) — without this it would keep showing
+    // what was true when it opened rather than what was just saved. `render()`
+    // no-ops when nothing is open.
+    this.render();
+
     // Launch-at-login lives in the OS, not in settings.json. It is applied after
     // the write and its failure is reported without undoing that write — the
     // rest of the settings did save, and pretending otherwise would be worse.
@@ -610,6 +791,7 @@ class CheckInController {
       hourlyEnabled: settings.hourlyEnabled.checked,
       snoozeMinutes: settings.snoozeMinutes.value,
       workDays: [...this.draftWorkDays],
+      managerModeEnabled: settings.managerModeEnabled.checked,
     };
   }
 
@@ -619,6 +801,7 @@ class CheckInController {
     settings.workEnd.value = draft.workEnd;
     settings.hourlyEnabled.checked = draft.hourlyEnabled;
     settings.snoozeMinutes.value = draft.snoozeMinutes;
+    settings.managerModeEnabled.checked = draft.managerModeEnabled;
 
     this.draftWorkDays = [...draft.workDays];
     this.renderWorkDays();
@@ -646,6 +829,298 @@ class CheckInController {
     settings.error.textContent = issues.map((issue) => issue.message).join(' ');
   }
 
+  /* -------------------------------------------------------------------- team */
+
+  /**
+   * Bring up the Team panel, over the card if one is open and alone if not.
+   *
+   * Reached the same two ways Settings is — the icon on the card, and the tray
+   * item — and follows the identical standalone-window bookkeeping. Refuses to
+   * open on top of Settings (`openSettings` returns the guard), so the app
+   * shows at most one overlay at a time.
+   */
+  private async openTeam(): Promise<void> {
+    if (this.teamOpen || this.settingsOpen) return;
+
+    this.teamOpen = true;
+    this.teamStandalone = !this.visible;
+
+    try {
+      await this.refreshTeamPeopleList();
+      this.elements.team.personInput.value = '';
+      this.setTeamPersonError('');
+      this.teamMember = null;
+      this.renderTeamMember();
+
+      const panel = this.elements.team.panel;
+      panel.hidden = false;
+
+      // Same reasoning as Settings: `aria-modal` alone doesn't stop Tab from
+      // reaching the card behind the overlay.
+      this.elements.card.inert = true;
+
+      if (this.teamStandalone) await showWindow();
+
+      requestAnimationFrame(() => {
+        panel.classList.add('is-open');
+      });
+
+      this.elements.team.personInput.focus();
+    } catch (error) {
+      // Same reasoning as `openSettings`'s catch: a `teamOpen` that never comes
+      // down would both block reopening and suppress every check-in for the
+      // rest of the day via the `tick()` guard.
+      this.hideTeamPanel();
+      await showError('Could not open the Team panel', describeError(error));
+    }
+  }
+
+  /** Put the panel away and hand the card back, without touching the window. */
+  private hideTeamPanel(): void {
+    this.teamOpen = false;
+    this.teamMember = null;
+
+    const panel = this.elements.team.panel;
+    panel.classList.remove('is-open');
+    panel.hidden = true;
+    this.elements.card.inert = false;
+  }
+
+  private async closeTeam(): Promise<void> {
+    if (!this.teamOpen) return;
+
+    this.hideTeamPanel();
+
+    if (this.teamStandalone) {
+      await hideWindow();
+      return;
+    }
+
+    this.elements.taskInput.focus();
+  }
+
+  /** Populate the handle autocomplete with every report that already has a file. */
+  private async refreshTeamPeopleList(): Promise<void> {
+    const people = await listTeamPeople(this.vault);
+    this.elements.team.peopleList.replaceChildren(
+      ...people.map((person) => {
+        const option = document.createElement('option');
+        option.value = person;
+        return option;
+      }),
+    );
+  }
+
+  /**
+   * Load (or create) a report's file and show it.
+   *
+   * Waits on `this.writes` first: a day-end mention of the same person may
+   * still be queued, and reading ahead of it would show stale tasks/notes and
+   * risk a lost update the next time this panel saves.
+   */
+  private async loadTeamMember(rawHandle: string): Promise<void> {
+    const handle = rawHandle.trim().replace(/^@/, '').toLowerCase();
+    if (handle === '') return;
+
+    if (!isPersonHandle(handle)) {
+      this.setTeamPersonError(
+        'Handles use lowercase letters, numbers, dots, dashes and underscores.',
+      );
+      return;
+    }
+
+    this.setTeamPersonError('');
+
+    try {
+      await this.writes;
+      this.teamMember = await openTeamMember(this.vault, handle);
+      this.elements.team.personInput.value = handle;
+      this.renderTeamMember();
+      await this.refreshTeamPeopleList();
+    } catch (error) {
+      await showError('Could not open that report', describeError(error));
+    }
+  }
+
+  private setTeamPersonError(message: string): void {
+    this.elements.team.personError.textContent = message;
+  }
+
+  private renderTeamMember(): void {
+    const team = this.elements.team;
+    const tasks = this.teamTasks();
+
+    team.taskList.replaceChildren(...tasks.map((task) => this.renderTeamTask(task)));
+    team.emptyState.hidden = tasks.length > 0;
+
+    // Newest first, and capped: this is a glance at recent activity, not a
+    // full history browser — the file on disk is that.
+    const notes = [...(this.teamMember?.notes ?? [])]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 8);
+
+    team.notes.replaceChildren(
+      ...notes.map((note) => {
+        const item = document.createElement('li');
+        item.className = 'team-note';
+
+        const date = document.createElement('span');
+        date.className = 'team-note-date';
+        date.textContent = note.date;
+
+        const text = document.createElement('span');
+        text.textContent = note.text;
+
+        item.append(date, text);
+        return item;
+      }),
+    );
+  }
+
+  private renderTeamTask(task: Task): HTMLLIElement {
+    return renderTaskRow(task, {
+      onToggle: () => {
+        this.updateTeamTasks(setTaskStatus(this.teamTasks(), task.title, cycleStatus(task.status)));
+      },
+      onRemove: () => {
+        this.updateTeamTasks(removeTask(this.teamTasks(), task.title));
+      },
+    });
+  }
+
+  private teamTasks(): Task[] {
+    return this.teamMember?.tasks ?? [];
+  }
+
+  private updateTeamTasks(tasks: Task[]): void {
+    if (this.teamMember === null) return;
+
+    this.teamMember = { ...this.teamMember, tasks };
+    this.renderTeamMember();
+    this.saveTeamMember();
+  }
+
+  private onAddTeamTask(): void {
+    const title = this.elements.team.taskInput.value;
+    if (title.trim() === '') return;
+
+    if (this.teamMember === null) {
+      this.setTeamStatus('Open a report first');
+      return;
+    }
+
+    this.elements.team.taskInput.value = '';
+    this.updateTeamTasks(addTask(this.teamTasks(), title));
+  }
+
+  private onAddTeamNote(): void {
+    const text = this.elements.team.noteInput.value;
+    if (text.trim() === '') return;
+
+    if (this.teamMember === null) {
+      this.setTeamStatus('Open a report first');
+      return;
+    }
+
+    this.elements.team.noteInput.value = '';
+    this.teamMember = addTeamNote(this.teamMember, toDateKey(new Date()), text);
+    this.renderTeamMember();
+    this.saveTeamMember();
+    this.setTeamStatus('Note saved');
+  }
+
+  /** Queue a team file write behind any in flight, on the same chain day-file saves use. */
+  private saveTeamMember(): void {
+    const member = this.teamMember;
+    if (member === null) return;
+
+    this.writes = this.writes
+      .then(() => writeTeamMember(this.vault, member))
+      .catch(async (error: unknown) => {
+        await showError('Could not save your team notes', describeError(error));
+      });
+  }
+
+  /**
+   * The day-end "anything on your reports?" step. Only shown when manager mode
+   * is on (see `render`); auto-creates a report's file the first time they're
+   * mentioned, the same "no roster, just usage" rule the Team panel follows.
+   */
+  private async onAddTeamDayEndNote(): Promise<void> {
+    const trimmed = this.elements.teamDayEndInput.value.trim();
+    if (trimmed === '') return;
+
+    const people = extractPeople(trimmed);
+    if (people.length === 0) {
+      this.setStatus('Mention someone with @ to log it, e.g. @alice');
+      return;
+    }
+
+    this.elements.teamDayEndInput.value = '';
+    const today = toDateKey(new Date());
+
+    this.writes = this.writes
+      .then(async () => {
+        for (const person of people) {
+          const existing = await openTeamMember(this.vault, person);
+          await writeTeamMember(this.vault, addTeamNote(existing, today, trimmed));
+        }
+      })
+      .catch(async (error: unknown) => {
+        await showError('Could not save your team note', describeError(error));
+      });
+
+    await this.writes;
+    this.setStatus('Logged');
+  }
+
+  /**
+   * Every tracked report's file, for the rollup writer and the clipboard
+   * briefing — the manager-perspective sibling of `daysOfWeek`.
+   */
+  private async allTeamMembers(): Promise<TeamMemberDocument[]> {
+    const people = await listTeamPeople(this.vault);
+    const members: TeamMemberDocument[] = [];
+
+    for (const person of people) {
+      const member = await readTeamMember(this.vault, person);
+      if (member !== null) members.push(member);
+    }
+
+    return members;
+  }
+
+  /** Copy this week across every tracked report, framed for an agent. */
+  private async copyTeamWeek(): Promise<void> {
+    try {
+      const monday = startOfIsoWeek(new Date());
+      const weekStart = toDateKey(monday);
+      const weekEnd = toDateKey(addDays(monday, 6));
+
+      const briefing = teamWeekBriefing(await this.allTeamMembers(), weekStart, weekEnd);
+      if (briefing === null) {
+        this.setTeamStatus('No reports tracked yet');
+        return;
+      }
+
+      await copyToClipboard(briefing);
+      this.setTeamStatus('Team week copied');
+    } catch (error) {
+      await showError('Could not copy your team week', describeError(error));
+    }
+  }
+
+  private setTeamStatus(text: string): void {
+    const status = this.elements.team.status;
+    status.textContent = text;
+    status.classList.add('is-visible');
+
+    window.clearTimeout(this.teamStatusTimer);
+    this.teamStatusTimer = window.setTimeout(() => {
+      status.classList.remove('is-visible');
+    }, STATUS_HOLD_MS);
+  }
+
   private render(): void {
     const day = this.day;
     const slot = this.slot;
@@ -659,6 +1134,12 @@ class CheckInController {
     const visible = tasksForCheckIn(day.tasks, previouslyCompleted);
     this.elements.taskList.replaceChildren(...visible.map((task) => this.renderTask(task)));
     this.elements.emptyState.hidden = visible.length > 0;
+
+    // The one place the recurring check-in grows an extra step: only at
+    // day-end, and only with manager mode on. See `Settings.managerModeEnabled`.
+    this.elements.teamDayEndForm.hidden = !(
+      slot.kind === 'day-end' && this.settings.managerModeEnabled
+    );
   }
 
   private describeProgress(day: DayDocument, slot: CheckInSlot): string {
@@ -701,53 +1182,16 @@ class CheckInController {
     return endsWorkingWeek(this.slotDate(slot), this.settings);
   }
 
-  /**
-   * Build one task row.
-   *
-   * Titles go in with `textContent`, never `innerHTML`. The text is the user's
-   * own, but it round-trips through a file on disk that other tools (and agents)
-   * can write — treating it as markup would be a standing XSS hole for the sake
-   * of nothing.
-   */
   private renderTask(task: Task): HTMLLIElement {
-    const item = document.createElement('li');
-    item.className = 'task';
-    if (task.status === 'in-progress') item.classList.add('is-in-progress');
-    if (task.status === 'completed') item.classList.add('is-completed');
-    if (task.carriedOver === true) item.classList.add('is-carried');
-
-    const glyphs: Record<Task['status'], string> = {
-      upcoming: '',
-      'in-progress': '•',
-      completed: '✓',
-    };
-
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'task-toggle';
-    toggle.textContent = glyphs[task.status];
-    toggle.title = `Mark ${cycleStatus(task.status).replace('-', ' ')}`;
-    toggle.setAttribute('aria-label', `${task.title} — ${task.status}`);
-    toggle.addEventListener('click', () => {
-      this.updateTasks(setTaskStatus(this.tasks(), task.title, cycleStatus(task.status)));
+    return renderTaskRow(task, {
+      carried: task.carriedOver === true,
+      onToggle: () => {
+        this.updateTasks(setTaskStatus(this.tasks(), task.title, cycleStatus(task.status)));
+      },
+      onRemove: () => {
+        this.updateTasks(removeTask(this.tasks(), task.title));
+      },
     });
-
-    const title = document.createElement('span');
-    title.className = 'task-title';
-    title.textContent = task.title;
-
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'task-remove';
-    remove.textContent = '×';
-    remove.title = 'Remove task';
-    remove.setAttribute('aria-label', `Remove ${task.title}`);
-    remove.addEventListener('click', () => {
-      this.updateTasks(removeTask(this.tasks(), task.title));
-    });
-
-    item.append(toggle, title, remove);
-    return item;
   }
 
   private tasks(): Task[] {
@@ -850,6 +1294,7 @@ class CheckInController {
    */
   private async refreshRollups(slot: CheckInSlot): Promise<void> {
     await this.writeRollupForWeekOf(slot.date);
+    if (this.settings.managerModeEnabled) await this.writeTeamRollupForWeekOf(slot.date);
 
     if (slot.kind !== 'day-start') return;
 
@@ -859,6 +1304,7 @@ class CheckInController {
       if (weekFileName(previous) === weekFileName(slot.date)) return;
 
       await this.writeRollupForWeekOf(previous);
+      if (this.settings.managerModeEnabled) await this.writeTeamRollupForWeekOf(previous);
     } catch (error) {
       console.warn('Could not heal the previous weekly rollup:', describeError(error));
     }
@@ -894,6 +1340,27 @@ class CheckInController {
     } catch (error) {
       // A rollup is derived data — never let it take down the check-in.
       console.warn('Could not write the weekly rollup:', describeError(error));
+    }
+  }
+
+  /** Regenerate the team rollup file for the ISO week containing `date`. */
+  private async writeTeamRollupForWeekOf(date: string): Promise<void> {
+    const name = teamWeekFileName(date);
+    if (name === null) return;
+
+    const slotDate = fromDateKey(date);
+    if (slotDate === null) return;
+
+    const monday = startOfIsoWeek(slotDate);
+    const weekStart = toDateKey(monday);
+    const weekEnd = toDateKey(addDays(monday, 6));
+
+    try {
+      const members = await this.allTeamMembers();
+      await this.vault.write(name, teamWeeklyRollup(members, weekStart, weekEnd));
+    } catch (error) {
+      // A rollup is derived data — never let it take down the check-in.
+      console.warn('Could not write the team weekly rollup:', describeError(error));
     }
   }
 

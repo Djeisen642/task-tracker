@@ -13,6 +13,7 @@
 import { fromDateKey, describeDate, toWeekKey, type DateKey } from '../dates.ts';
 import { extractPeople, isKudos } from './mentions.ts';
 import type { DayDocument } from './day.ts';
+import type { TeamMemberDocument } from './team.ts';
 
 function heading(day: DayDocument): string {
   const parsed = fromDateKey(day.date);
@@ -148,6 +149,111 @@ export function weeklyRollup(days: readonly DayDocument[]): string {
 export function weekFileName(date: DateKey): string | null {
   const parsed = fromDateKey(date);
   return parsed === null ? null : `${toWeekKey(parsed)}.md`;
+}
+
+/** The vault filename for the team rollup of the week containing `date`. */
+export function teamWeekFileName(date: DateKey): string | null {
+  const parsed = fromDateKey(date);
+  return parsed === null ? null : `${toWeekKey(parsed)}-team.md`;
+}
+
+/**
+ * The manager's weekly view: one section per tracked report.
+ *
+ * Task status is always the *current* snapshot — there's no history of when a
+ * task moved, so "open" and "completed" reflect right now, not this week
+ * specifically. Notes carry their own date, so `weekStart`/`weekEnd` filter
+ * those to the window; without that filter every week's rollup would show a
+ * report's entire note history.
+ */
+export function teamWeeklyRollup(
+  members: readonly TeamMemberDocument[],
+  weekStart: DateKey,
+  weekEnd: DateKey,
+): string {
+  const parsed = fromDateKey(weekStart);
+  const weekKey = parsed === null ? 'unknown' : toWeekKey(parsed);
+  const sorted = [...members].sort((a, b) => a.person.localeCompare(b.person));
+
+  const sections =
+    sorted.length > 0
+      ? sorted.flatMap((member) => {
+          const notesThisWeek = member.notes
+            .filter((note) => note.date >= weekStart && note.date <= weekEnd)
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .map((note) => `${note.text} _(${note.date})_`);
+          const open = member.tasks
+            .filter((task) => task.status !== 'completed')
+            .map((task) => task.title);
+          const completed = member.tasks
+            .filter((task) => task.status === 'completed')
+            .map((task) => task.title);
+
+          return [
+            `## @${member.person}`,
+            '',
+            '### Notes this week',
+            '',
+            ...bulletList(notesThisWeek, 'Nothing logged this week'),
+            '',
+            '### Open',
+            '',
+            ...bulletList(open, 'Nothing tracked'),
+            '',
+            '### Completed',
+            '',
+            ...bulletList(completed, 'Nothing marked complete'),
+            '',
+          ];
+        })
+      : ['_No reports tracked yet._', ''];
+
+  return [
+    `# Team — Week ${weekKey}`,
+    '',
+    `Reports tracked: ${String(sorted.length)}`,
+    '',
+    ...sections,
+  ]
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .concat('\n');
+}
+
+/**
+ * The team week with enough preamble to hand to an agent that cannot see the
+ * vault — the manager-perspective sibling of `agentWeekBriefing`.
+ *
+ * Returns `null` when nothing is tracked yet, for the same reason
+ * `agentWeekBriefing` does: an authoritative-looking briefing with nothing in
+ * it is worse than the app saying it has nothing to give you.
+ */
+export function teamWeekBriefing(
+  members: readonly TeamMemberDocument[],
+  weekStart: DateKey,
+  weekEnd: DateKey,
+): string | null {
+  if (members.length === 0) return null;
+
+  return [
+    "Below is one manager's notes on their direct reports, kept by Task Tracker. It",
+    "reflects what the manager chose to log, not a complete record of each report's",
+    'work.',
+    '',
+    'Conventions: each report has a `## @handle` section. "Open" and "Completed" are',
+    'the *current* status of everything tracked for that person, not just this week —',
+    'a task shown open may have been open for longer than the window below. "Notes',
+    'this week" are dated observations logged in this window specifically. `#tag`',
+    'conventions match the day-file schema: `#kudos` a moment worth remembering,',
+    '`#blocker` something impeding progress.',
+    '',
+    'Absence of a note for a report this week means nothing was logged, not that',
+    'nothing happened.',
+    '',
+    '---',
+    '',
+    teamWeeklyRollup(members, weekStart, weekEnd),
+  ].join('\n');
 }
 
 /**

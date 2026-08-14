@@ -1,19 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
 import { serializeDay, createDay } from './markdown/day.ts';
+import { createTeamMember, serializeTeamMember } from './markdown/team.ts';
 import {
   dayFileName,
   dayKeyFromFileName,
+  isPersonHandle,
   isSafeVaultName,
   listDayKeys,
+  listTeamPeople,
   MemoryVault,
   openDay,
+  openTeamMember,
+  personFromFileName,
   previousDayKey,
   readDay,
   readDayRange,
+  readTeamMember,
+  teamFileName,
   todayKey,
   withinCarryOverHorizon,
   writeDay,
+  writeTeamMember,
 } from './vault.ts';
 
 const HOURS = { start: '09:00', end: '17:00' };
@@ -23,7 +31,15 @@ function dayFile(date: string, tasks: Parameters<typeof createDay>[3] = []) {
 }
 
 describe('isSafeVaultName', () => {
-  it.each(['2026-08-02.md', '2026-W32.md', 'CONTEXT.md'])('accepts %o', (name) => {
+  it.each([
+    '2026-08-02.md',
+    '2026-W32.md',
+    'CONTEXT.md',
+    'team.alice.md',
+    'team.alice-smith.md',
+    'team.a.md',
+    '2026-W32-team.md',
+  ])('accepts %o', (name) => {
     expect(isSafeVaultName(name)).toBe(true);
   });
 
@@ -35,12 +51,29 @@ describe('isSafeVaultName', () => {
     'notes.md',
     '',
     '..',
+    'team..md',
+    'team.Alice.md',
+    'team.-alice.md',
+    'team.alice-.md',
   ])('rejects %o', (name) => {
     expect(isSafeVaultName(name)).toBe(false);
   });
 
   it('rejects a traversal disguised with a valid-looking suffix', () => {
     expect(isSafeVaultName('..2026-08-02.md')).toBe(false);
+  });
+});
+
+describe('isPersonHandle', () => {
+  it.each(['alice', 'a', 'alice-smith', 'alice.smith', 'alice_smith', 'a1'])(
+    'accepts %o',
+    (handle) => {
+      expect(isPersonHandle(handle)).toBe(true);
+    },
+  );
+
+  it.each(['', 'Alice', '-alice', 'alice-', 'al ice', 'alice/bob'])('rejects %o', (handle) => {
+    expect(isPersonHandle(handle)).toBe(false);
   });
 });
 
@@ -211,6 +244,78 @@ describe('readDayRange', () => {
 describe('todayKey', () => {
   it('formats the supplied date', () => {
     expect(todayKey(new Date(2026, 7, 2))).toBe('2026-08-02');
+  });
+});
+
+describe('teamFileName / personFromFileName', () => {
+  it('round-trips', () => {
+    expect(personFromFileName(teamFileName('alice'))).toBe('alice');
+  });
+
+  it('returns null for a non-team file', () => {
+    expect(personFromFileName('CONTEXT.md')).toBeNull();
+    expect(personFromFileName('2026-08-02.md')).toBeNull();
+    expect(personFromFileName('2026-W32-team.md')).toBeNull();
+  });
+});
+
+describe('listTeamPeople', () => {
+  it('returns handles ascending, ignoring other files', async () => {
+    const vault = new MemoryVault({
+      'team.bob.md': '',
+      'team.alice.md': '',
+      'CONTEXT.md': '',
+      '2026-08-02.md': '',
+    });
+    expect(await listTeamPeople(vault)).toEqual(['alice', 'bob']);
+  });
+
+  it('returns nothing for an empty vault', async () => {
+    expect(await listTeamPeople(new MemoryVault())).toEqual([]);
+  });
+});
+
+describe('readTeamMember / writeTeamMember', () => {
+  it('returns null for a report with no file', async () => {
+    expect(await readTeamMember(new MemoryVault(), 'alice')).toBeNull();
+  });
+
+  it('round-trips a written team member', async () => {
+    const vault = new MemoryVault();
+    const member = {
+      ...createTeamMember('alice'),
+      tasks: [{ title: 'Ship it', status: 'upcoming' as const }],
+    };
+    await writeTeamMember(vault, member);
+
+    const loaded = await readTeamMember(vault, 'alice');
+    expect(loaded?.tasks).toEqual([{ title: 'Ship it', status: 'upcoming' }]);
+  });
+
+  it('writes to the expected filename', async () => {
+    const vault = new MemoryVault();
+    await writeTeamMember(vault, createTeamMember('alice'));
+    expect(Object.keys(vault.snapshot())).toEqual(['team.alice.md']);
+  });
+});
+
+describe('openTeamMember', () => {
+  it('returns the existing file untouched', async () => {
+    const vault = new MemoryVault({
+      'team.alice.md': serializeTeamMember({
+        ...createTeamMember('alice'),
+        tasks: [{ title: 'Existing', status: 'in-progress' }],
+      }),
+    });
+    const member = await openTeamMember(vault, 'alice');
+    expect(member.tasks).toEqual([{ title: 'Existing', status: 'in-progress' }]);
+  });
+
+  it('creates an empty document when no file exists yet, without writing it', async () => {
+    const vault = new MemoryVault();
+    const member = await openTeamMember(vault, 'alice');
+    expect(member).toEqual(createTeamMember('alice'));
+    expect(vault.snapshot()).toEqual({});
   });
 });
 

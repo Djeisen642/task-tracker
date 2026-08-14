@@ -101,6 +101,14 @@ export async function openSettings(page: Page): Promise<void> {
   await page.clock.runFor(100);
 }
 
+/** Open the Team panel the same way `openSettings` opens Settings — see there for why. */
+export async function openTeam(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    document.getElementById('team-open')?.click();
+  });
+  await page.clock.runFor(100);
+}
+
 /** Every filename currently in the browser-backed vault. */
 export function listVaultFiles(page: Page): Promise<string[]> {
   return page.evaluate((prefix) => {

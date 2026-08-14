@@ -34,17 +34,14 @@
 import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
 import type { Task, TaskStatus } from '../tasks.ts';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
+import { splitSections, trimBlankEdges, type ExtraSection } from './sections.ts';
+
+export type { ExtraSection } from './sections.ts';
 
 /** A timestamped thought. `time` is local `HH:MM`. */
 export interface Note {
   time: Clock;
   text: string;
-}
-
-/** A heading and its body, preserved verbatim for sections we don't own. */
-export interface ExtraSection {
-  heading: string;
-  lines: string[];
 }
 
 export interface DayDocument {
@@ -94,34 +91,6 @@ const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 
 /** Owned frontmatter keys, in the order they're written. */
 const OWNED_FIELDS = ['date', 'work_start', 'work_end', 'last_check_in'];
-
-interface Section {
-  heading: string;
-  lines: string[];
-}
-
-/** Split a body into `##`-delimited sections, keeping any preamble separate. */
-function splitSections(body: string): { preamble: string[]; sections: Section[] } {
-  const preamble: string[] = [];
-  const sections: Section[] = [];
-  let current: Section | null = null;
-
-  for (const line of body.split('\n')) {
-    if (/^##\s+/.test(line)) {
-      current = { heading: line.trim(), lines: [] };
-      sections.push(current);
-      continue;
-    }
-
-    if (current === null) {
-      preamble.push(line);
-    } else {
-      current.lines.push(line);
-    }
-  }
-
-  return { preamble, sections };
-}
 
 function parseTasks(lines: readonly string[]): Task[] {
   const tasks: Task[] = [];
@@ -207,15 +176,6 @@ export function parseDay(
     extraFields,
     extraSections,
   };
-}
-
-/** Trim leading and trailing blank lines from a preserved section body. */
-function trimBlankEdges(lines: readonly string[]): string[] {
-  let start = 0;
-  let end = lines.length;
-  while (start < end && (lines[start] ?? '').trim() === '') start += 1;
-  while (end > start && (lines[end - 1] ?? '').trim() === '') end -= 1;
-  return lines.slice(start, end);
 }
 
 /** Render a day document back to Markdown. Round-trips with `parseDay`. */

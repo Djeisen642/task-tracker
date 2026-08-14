@@ -97,15 +97,19 @@ Other items:
 
 ## The people pillar
 
-Currently `@person` and `#kudos` are parsed and indexed, but there's no UI built
-on them. That's where the compounding value is:
+`@person` and `#kudos` are parsed and indexed from the user's own day-file
+notes, and manager mode builds on top of that with its own per-person storage:
 
-- A per-person view: everything mentioning `@alice`, kudos first.
-- 1:1 prep — agenda items accumulated since the last 1:1, and carry-over of
-  anything not covered.
-- A dedicated end-of-week prompt: "anything to note about your reports?"
-- Roster management so `@alice` and `@alice.smith` are one person.
-- Quarterly and annual rollups per person, sized for a review document.
+| Status | Item                                                                                                                                                                             |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| done   | A settings toggle ("I manage people") that adds an end-of-day step for logging what a report is up to — see `Settings.managerModeEnabled`.                                       |
+| done   | A per-person view: `team.<person>.md`, one running file per report — its own tasks and dated notes, separate from the user's day files.                                          |
+| done   | The Team panel (tray, or the card icon): open/create a report by handle, cycle their tasks, add dated notes, browse the last few.                                                |
+| done   | A weekly rollup across every tracked report, `YYYY-Www-team.md`, refreshed the same way the personal weekly rollup is — plus a "Copy team week" clipboard briefing for an agent. |
+| done   | Roster-by-usage rather than a roster to maintain: a report's file is created the first time they're logged, from either the Team panel or an `@mention` in the day-end step.     |
+| todo   | 1:1 prep — agenda items accumulated since the last 1:1, and carry-over of anything not covered.                                                                                  |
+| todo   | Quarterly and annual rollups per person, sized for a review document.                                                                                                            |
+| todo   | Handle aliasing, so `@alice` and `@alice.smith` resolve to one person rather than two team files.                                                                                |
 
 ## Nudge behavior
 

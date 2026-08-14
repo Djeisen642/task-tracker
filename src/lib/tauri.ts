@@ -173,6 +173,16 @@ export function onSettingsRequested(handler: () => void): Promise<void> {
   return onTrayEvent('open-settings', handler);
 }
 
+/** Tray "Team…" — always available, like every other tray item. */
+export function onTeamRequested(handler: () => void): Promise<void> {
+  return onTrayEvent('open-team', handler);
+}
+
+/** Tray "Copy team week for an agent". */
+export function onTeamWeekRequested(handler: () => void): Promise<void> {
+  return onTrayEvent('copy-team-week', handler);
+}
+
 /**
  * Surface an error to the user with a native dialog.
  *
