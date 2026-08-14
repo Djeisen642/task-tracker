@@ -85,6 +85,7 @@ import {
   saveSettingsJson,
   setAutostart,
   setTrayStatus,
+  setWindowSize,
   showCheckIn,
   showError,
   showWindow,
@@ -108,6 +109,11 @@ import {
 /** How long a transient status message stays on the card. */
 const STATUS_HOLD_MS = 2_400;
 
+/** The window's footprint, matching `tauri.conf.json`. */
+const COMPACT_SIZE = { width: 420, height: 470 };
+/** More room for a long task list, a browsed-through Team panel, or a tight Settings panel. */
+const EXPANDED_SIZE = { width: 420, height: 760 };
+
 interface Elements {
   card: HTMLElement;
   headline: HTMLElement;
@@ -124,6 +130,7 @@ interface Elements {
   snooze: HTMLButtonElement;
   copyStandup: HTMLButtonElement;
   copyWeek: HTMLButtonElement;
+  expandToggle: HTMLButtonElement;
   status: HTMLElement;
   settings: SettingsElements;
   team: TeamElements;
@@ -133,6 +140,7 @@ interface SettingsElements {
   panel: HTMLElement;
   open: HTMLButtonElement;
   close: HTMLButtonElement;
+  expandToggle: HTMLButtonElement;
   workStart: HTMLInputElement;
   workEnd: HTMLInputElement;
   workDays: HTMLElement;
@@ -156,6 +164,7 @@ interface TeamElements {
   open: HTMLButtonElement;
   panel: HTMLElement;
   close: HTMLButtonElement;
+  expandToggle: HTMLButtonElement;
   personInput: HTMLInputElement;
   personLoad: HTMLButtonElement;
   personError: HTMLElement;
@@ -195,11 +204,13 @@ function resolveElements(): Elements {
     snooze: mustGet<HTMLButtonElement>('snooze'),
     copyStandup: mustGet<HTMLButtonElement>('copy-standup'),
     copyWeek: mustGet<HTMLButtonElement>('copy-week'),
+    expandToggle: mustGet<HTMLButtonElement>('card-expand'),
     status: mustGet('status'),
     settings: {
       panel: mustGet('settings'),
       open: mustGet<HTMLButtonElement>('settings-open'),
       close: mustGet<HTMLButtonElement>('settings-close'),
+      expandToggle: mustGet<HTMLButtonElement>('settings-expand'),
       workStart: mustGet<HTMLInputElement>('work-start'),
       workEnd: mustGet<HTMLInputElement>('work-end'),
       workDays: mustGet('work-days'),
@@ -217,6 +228,7 @@ function resolveElements(): Elements {
       open: mustGet<HTMLButtonElement>('team-open'),
       panel: mustGet('team'),
       close: mustGet<HTMLButtonElement>('team-close'),
+      expandToggle: mustGet<HTMLButtonElement>('team-expand'),
       personInput: mustGet<HTMLInputElement>('team-person-input'),
       personLoad: mustGet<HTMLButtonElement>('team-person-load'),
       personError: mustGet('team-person-error'),
@@ -314,6 +326,15 @@ class CheckInController {
   /** The report currently loaded in the Team panel, or `null` when none is. */
   private teamMember: TeamMemberDocument | null = null;
   private teamStatusTimer: number | undefined;
+  /**
+   * `true` when the window is at `EXPANDED_SIZE` rather than `COMPACT_SIZE`.
+   *
+   * In-memory only, not persisted to `settings.json` — like a snooze, this is
+   * "more room right now," not durable configuration. It survives between
+   * check-ins within one run of the app (this controller lives for the whole
+   * run) and resets to compact on the next launch.
+   */
+  private expanded = false;
   /** Last text pushed to the tray, so identical updates aren't re-sent. */
   private lastTrayStatus: string | null = null;
   /**
@@ -366,6 +387,10 @@ class CheckInController {
     this.elements.teamDayEndForm.addEventListener('submit', (event) => {
       event.preventDefault();
       void this.onAddTeamDayEndNote();
+    });
+
+    this.elements.expandToggle.addEventListener('click', () => {
+      void this.toggleExpanded();
     });
 
     this.bindSettingsEvents();
@@ -431,6 +456,10 @@ class CheckInController {
     team.copyWeek.addEventListener('click', () => {
       void this.copyTeamWeek();
     });
+
+    team.expandToggle.addEventListener('click', () => {
+      void this.toggleExpanded();
+    });
   }
 
   private bindSettingsEvents(): void {
@@ -442,6 +471,10 @@ class CheckInController {
 
     settings.close.addEventListener('click', () => {
       void this.closeSettings();
+    });
+
+    settings.expandToggle.addEventListener('click', () => {
+      void this.toggleExpanded();
     });
 
     settings.cancel.addEventListener('click', () => {
@@ -628,6 +661,47 @@ class CheckInController {
     if (this.visible) return;
 
     await this.present(onDemandSlot(new Date(), this.settings));
+  }
+
+  /* ----------------------------------------------------------------- expand */
+
+  /**
+   * Toggle between `COMPACT_SIZE` and `EXPANDED_SIZE`.
+   *
+   * One flag drives all three headers (card, Settings, Team): the window is
+   * one size regardless of which overlay happens to be showing, so whichever
+   * one the button was clicked from, all three stay in sync for whenever the
+   * others are opened next.
+   */
+  private async toggleExpanded(): Promise<void> {
+    const next = !this.expanded;
+    const size = next ? EXPANDED_SIZE : COMPACT_SIZE;
+
+    try {
+      await setWindowSize(size.width, size.height);
+      this.expanded = next;
+    } catch (error) {
+      // Leave `expanded` (and so the buttons) truthful about the size the
+      // window is actually still at, rather than claiming a resize that
+      // didn't happen.
+      await showError('Could not resize the window', describeError(error));
+    }
+
+    this.renderExpandButtons();
+  }
+
+  private renderExpandButtons(): void {
+    const label = this.expanded ? 'Collapse' : 'Expand';
+
+    for (const button of [
+      this.elements.expandToggle,
+      this.elements.settings.expandToggle,
+      this.elements.team.expandToggle,
+    ]) {
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      button.setAttribute('aria-pressed', String(this.expanded));
+    }
   }
 
   /* ---------------------------------------------------------------- settings */

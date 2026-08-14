@@ -203,3 +203,9 @@ hardware before trusting it:
    actually darkening the time picker's dropdown.
 8. **The whole loop end to end** — a real workday of hourly prompts producing a
    day file you'd actually want to read back.
+9. **The expand/collapse toggle's `setSize` call**, against a window configured
+   `resizable: false`. Programmatic resize is expected to work regardless of
+   that flag — it's a common pattern for splash-to-main-window transitions —
+   but it's unverified against a real Windows compositor, and so is whether
+   re-invoking `position_checkin` after the resize reliably keeps the window
+   pinned to the same corner rather than a platform re-centering it.

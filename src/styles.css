@@ -402,6 +402,12 @@ body {
   line-height: 1.15;
 }
 
+/* The expand toggle's only visual state — same glyph, tinted while active. */
+.icon-button[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .status {
   flex: 1;
   overflow: hidden;
