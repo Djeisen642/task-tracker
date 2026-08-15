@@ -22,30 +22,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Check formatting
-        run: npm run format:check
+        run: pnpm run format:check
 
       - name: Lint
-        run: npm run lint
+        run: pnpm run lint
 
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
 
       - name: Unit tests
-        run: npm run test
+        run: pnpm run test
 
       # A green lint/test run does not prove the app bundles.
       - name: Build
-        run: npm run build
+        run: pnpm run build
 
   # Drive the real app in a browser. The unit job proves the logic is right; this
   # proves the app actually runs — that the controller finds its elements, that
@@ -58,20 +62,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          cache: 'pnpm'
 
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
       - name: Run end-to-end tests
-        run: npm run e2e
+        run: pnpm run e2e
 
       - name: Upload report
         if: failure()
@@ -116,18 +124,22 @@ jobs:
             libdbus-1-dev \
             pkg-config
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: npm
+          cache: 'pnpm'
 
       # generate_context! embeds the built frontend and icons at compile time,
       # so the frontend must exist before cargo runs.
       - name: Build frontend
         run: |
-          npm ci
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm run build
 
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
