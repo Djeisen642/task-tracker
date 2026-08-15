@@ -672,22 +672,31 @@ class CheckInController {
    * one size regardless of which overlay happens to be showing, so whichever
    * one the button was clicked from, all three stay in sync for whenever the
    * others are opened next.
+   *
+   * `expanded` flips **synchronously**, before the `await`, and the buttons
+   * are rendered immediately after — not after `setWindowSize` resolves. A
+   * flag updated only on success is not a guard against two clicks fired
+   * before the first IPC round trip returns: both would read the same stale
+   * `this.expanded`, compute the same `next`, and a double-click meant to
+   * toggle expand-then-collapse would net out expanded instead. Same
+   * reasoning as `presenting` in `present()`.
    */
   private async toggleExpanded(): Promise<void> {
     const next = !this.expanded;
-    const size = next ? EXPANDED_SIZE : COMPACT_SIZE;
+    this.expanded = next;
+    this.renderExpandButtons();
 
+    const size = next ? EXPANDED_SIZE : COMPACT_SIZE;
     try {
       await setWindowSize(size.width, size.height);
-      this.expanded = next;
     } catch (error) {
-      // Leave `expanded` (and so the buttons) truthful about the size the
-      // window is actually still at, rather than claiming a resize that
+      // Revert: leave `expanded` (and so the buttons) truthful about the size
+      // the window is actually still at, rather than claiming a resize that
       // didn't happen.
+      this.expanded = !next;
+      this.renderExpandButtons();
       await showError('Could not resize the window', describeError(error));
     }
-
-    this.renderExpandButtons();
   }
 
   private renderExpandButtons(): void {

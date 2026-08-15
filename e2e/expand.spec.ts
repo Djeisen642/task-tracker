@@ -56,6 +56,28 @@ test('stays in sync across the card, Settings and Team headers', async ({ page }
   await expect(page.locator('#team-expand')).toHaveAttribute('aria-pressed', 'false');
 });
 
+test('a rapid double-click nets back to the original state, not stuck expanded', async ({
+  page,
+}) => {
+  // The regression: `expanded` used to flip only after `setWindowSize`
+  // resolved, so a second click fired before that (real, IPC-latency) gap
+  // closed read the same stale flag as the first and computed the same
+  // target size — a double-click meant to toggle back netted out expanded
+  // instead. Dispatching both clicks inside one `evaluate` call, rather than
+  // two awaited `page.click()`s, is what reproduces that: it fires the second
+  // click before the first's async continuation has had a chance to run,
+  // which two round trips through Playwright's own IPC would not.
+  await startApp(page);
+
+  await page.evaluate(() => {
+    const button = document.getElementById('card-expand');
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+
+  await expect(page.locator('#card-expand')).toHaveAttribute('aria-pressed', 'false');
+});
+
 test('does not throw with no native window behind it', async ({ page }) => {
   // The `beforeEach` above fails the test on any uncaught page error, so a
   // clean run here is the assertion — `setWindowSize`'s no-op path in the
