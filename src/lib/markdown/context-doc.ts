@@ -29,11 +29,13 @@ are preserved — but changes to this file will be overwritten.
 
 ## Files
 
-| Pattern         | What it is                                             |
-| --------------- | ------------------------------------------------------ |
-| \`YYYY-MM-DD.md\` | One workday: its task list and timestamped notes.      |
-| \`YYYY-Www.md\`   | A generated weekly rollup (completed work, open items, kudos). |
-| \`CONTEXT.md\`    | This file.                                             |
+| Pattern              | What it is                                                      |
+| --------------------- | ---------------------------------------------------------------- |
+| \`YYYY-MM-DD.md\`       | One workday: its task list and timestamped notes.                |
+| \`YYYY-Www.md\`         | A generated weekly rollup (completed work, open items, kudos).   |
+| \`team.<person>.md\`    | A manager's running notes on one direct report. Only present when the user tracks reports. |
+| \`YYYY-Www-team.md\`    | A generated weekly rollup across every tracked report.           |
+| \`CONTEXT.md\`          | This file.                                                        |
 
 ## Day file format
 
@@ -88,16 +90,72 @@ Each note is \`- HH:MM — text\` in local time, in the order it was written.
   - \`#blocker\` — something impeding progress.
   - \`#decision\` — a decision made and its reasoning.
 
+## Team file format
+
+Present only if the user manages people and has logged something about at
+least one report. There is no roster: a \`team.<person>.md\` file exists once
+the user has typed a note or task for that handle, and never before.
+
+\`\`\`markdown
+---
+person: alice
+---
+
+# @alice
+
+## Tasks
+
+- [ ] Migrate the queue consumer
+- [/] Onboarding for the new hire
+- [x] Reviewed the design doc _(2026-08-03)_
+
+## Notes
+
+- 2026-08-10 — Shipped the migration script, unblocked the release #kudos
+- 2026-08-12 — Waiting on design review before starting the API work #blocker
+\`\`\`
+
+The task markers and \`#tag\` conventions are identical to the day file. The one
+difference: a team note's date is the day it was logged, not a timestamp —
+this file spans many days, not one. A **completed** task also carries the date
+it was finished, as a trailing \`_(YYYY-MM-DD)_\` — that's what lets the weekly
+rollup show completions scoped to one week instead of the report's whole
+history. A completed task with no such date (hand-checked, say) isn't
+attributable to any particular week and won't appear in a weekly rollup, even
+though it's still marked done in this file.
+
+\`YYYY-Www-team.md\` is the weekly rollup across every tracked report: one
+section per person, with that week's notes, that week's completions, and
+their currently open tasks. \`#kudos\`- and \`#blocker\`-tagged notes from that
+week are pulled into their own \`### Kudos\`/\`### Blockers\` subsections rather
+than left inside \`### Notes this week\` — when this file is being read for a
+status report, those are usually the headline, not one line among many. It is
+the manager-perspective sibling of \`YYYY-Www.md\`.
+
 ## Answering questions about this vault
 
 - **"What did I do last week?"** — read that week's \`YYYY-Www.md\` rollup first;
   fall back to the individual day files if it is missing.
-- **"What has @alice been up to?"** — search all day files for \`@alice\`, and
-  weight \`#kudos\` notes most heavily.
+- **"What has @alice been up to?"** — read \`team.alice.md\` if it exists, then
+  search day files for \`@alice\`, weighting \`#kudos\` notes most heavily.
+- **"How's my team doing this week?" / "Summarize my team's week"** — read that
+  week's \`YYYY-Www-team.md\` rollup if it exists; fall back to reading every
+  \`team.<person>.md\` file directly.
+- **"Write me a status report for my boss"** — start from \`YYYY-Www-team.md\`.
+  Lead with each report's \`### Kudos\` — that's the recognition-worthy work, and
+  usually what a status report is actually for. Mention \`### Blockers\` next, as
+  risks to flag. \`### Completed\` is the concrete "what shipped" list for the
+  week; treat \`### Open\` as in-flight context, not a commitment — it says
+  nothing about *when* it'll be done. Note explicitly if a report has nothing
+  in one of these sections rather than omitting them silently; a quiet week is
+  worth saying so, not worth inventing content to fill.
 - **"Help me write my year-end review"** — gather every \`#kudos\` note plus all
   completed tasks across the period. The completed tasks are the *what*; the
-  notes are the *why it mattered*.
+  notes are the *why it mattered*. For a report, add their \`team.<person>.md\`
+  file to the same gathering.
 - Absence of an entry means nothing was logged, **not** that nothing happened.
   Days outside the user's configured work window, weekends, and holidays are
-  routinely empty.
+  routinely empty. The same applies to a missing \`team.<person>.md\` file: it
+  means the user hasn't logged anything about that person yet, not that the
+  person doesn't exist or hasn't done anything.
 `;

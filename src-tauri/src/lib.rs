@@ -93,6 +93,18 @@ pub fn run() {
             // see the vault's CONTEXT.md.
             let week_item =
                 MenuItem::with_id(app, "week", "Copy week for an agent", true, None::<&str>)?;
+            // Always present, like every item above it — there's no roster to be
+            // empty of, since a report's file is created the first time you log
+            // something about them. The manager-mode setting only gates the
+            // extra day-end prompt, not this panel.
+            let team_item = MenuItem::with_id(app, "team", "Team…", true, None::<&str>)?;
+            let team_week_item = MenuItem::with_id(
+                app,
+                "team_week",
+                "Copy team week for an agent",
+                true,
+                None::<&str>,
+            )?;
             let vault_item =
                 MenuItem::with_id(app, "vault", "Open vault folder", true, None::<&str>)?;
             let settings_item =
@@ -107,6 +119,8 @@ pub fn run() {
                     &check_in_item,
                     &standup_item,
                     &week_item,
+                    &team_item,
+                    &team_week_item,
                     &vault_item,
                     &settings_item,
                     &quit_item,
@@ -130,6 +144,12 @@ pub fn run() {
                     }
                     "week" => {
                         let _ = app.emit("copy-week", ());
+                    }
+                    "team" => {
+                        let _ = app.emit("open-team", ());
+                    }
+                    "team_week" => {
+                        let _ = app.emit("copy-team-week", ());
                     }
                     "vault" => {
                         let _ = app.emit("open-vault", ());
