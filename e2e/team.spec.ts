@@ -16,6 +16,7 @@ import {
   readSettings,
   readVaultFile,
   startApp,
+  teamFile,
 } from './harness.ts';
 
 test.beforeEach(({ page }) => {
@@ -316,4 +317,102 @@ test('saves the manager mode setting', async ({ page }) => {
   await expect(page.locator('#settings')).toBeHidden();
 
   expect(await readSettings(page)).toMatchObject({ managerModeEnabled: true });
+});
+
+test('records a completion date when a task is marked done via the Team panel', async ({
+  page,
+}) => {
+  await startApp(page);
+  await openTeam(page);
+
+  await page.fill('#team-person-input', 'alice');
+  await page.press('#team-person-input', 'Enter');
+  await page.fill('#team-task-input', 'Ship the migration');
+  await page.press('#team-task-input', 'Enter');
+
+  const toggle = page.locator('#team-task-list .task-toggle').first();
+  await toggle.click(); // upcoming -> in-progress
+  await toggle.click(); // in-progress -> completed
+
+  const contents = await readVaultFile(page, 'team.alice.md');
+  // 2026-08-03 is the frozen clock's date in every test that doesn't override `now`.
+  expect(contents).toContain('- [x] Ship the migration _(2026-08-03)_');
+});
+
+test('drops the completion date when a task is reopened', async ({ page }) => {
+  await startApp(page);
+  await openTeam(page);
+
+  await page.fill('#team-person-input', 'alice');
+  await page.press('#team-person-input', 'Enter');
+  await page.fill('#team-task-input', 'Ship the migration');
+  await page.press('#team-task-input', 'Enter');
+
+  const toggle = page.locator('#team-task-list .task-toggle').first();
+  await toggle.click(); // -> in-progress
+  await toggle.click(); // -> completed
+  await toggle.click(); // -> upcoming again
+
+  const contents = await readVaultFile(page, 'team.alice.md');
+  expect(contents).toContain('- [ ] Ship the migration\n');
+  expect(contents).not.toContain('_(2026-08-03)_');
+});
+
+test("excludes a task completed in a previous week from this week's team rollup", async ({
+  page,
+}) => {
+  // The bug this guards: a team task's status is a permanent field on one
+  // running file, not scoped to a day the way a personal day file's tasks
+  // are — without date-scoping, every week's rollup would repeat every
+  // completion the report has ever had.
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 17, 30),
+    settings: { managerModeEnabled: true },
+    files: {
+      'team.alice.md': teamFile('alice', [
+        { title: 'Shipped last month', marker: 'x', completedDate: '2026-07-01' },
+      ]),
+    },
+  });
+
+  await page.click('#done');
+
+  const rollup = await readVaultFile(page, '2026-W32-team.md');
+  expect(rollup).not.toBeNull();
+  expect(rollup).not.toContain('Shipped last month');
+  expect(rollup).toContain('Nothing completed this week');
+});
+
+test('surfaces kudos and blockers in the team rollup, not duplicated under Notes', async ({
+  page,
+}) => {
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 17, 30),
+    settings: { managerModeEnabled: true },
+    files: {
+      'team.alice.md': teamFile(
+        'alice',
+        [],
+        [
+          { date: '2026-08-03', text: 'Shipped the release #kudos' },
+          { date: '2026-08-03', text: 'Waiting on review #blocker' },
+          { date: '2026-08-03', text: 'A routine update' },
+        ],
+      ),
+    },
+  });
+
+  await page.click('#done');
+
+  const rollup = await readVaultFile(page, '2026-W32-team.md');
+  expect(rollup).not.toBeNull();
+  expect(rollup).toContain('### Kudos');
+  expect(rollup).toContain('- Shipped the release #kudos');
+  expect(rollup).toContain('### Blockers');
+  expect(rollup).toContain('- Waiting on review #blocker');
+
+  const notesSection = (rollup ?? '').split('### Notes this week')[1]?.split('### Open')[0] ?? '';
+  expect(notesSection).not.toContain('#kudos');
+  expect(notesSection).not.toContain('#blocker');
+  expect(notesSection).toContain('A routine update');
 });

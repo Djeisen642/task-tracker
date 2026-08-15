@@ -5,6 +5,7 @@ import {
   createTeamMember,
   parseTeamMember,
   serializeTeamMember,
+  updateCompletedDates,
   type TeamMemberDocument,
 } from './team.ts';
 
@@ -20,7 +21,7 @@ person: alice
 
 - [ ] Migrate the queue consumer
 - [/] Onboarding for the new hire
-- [x] Reviewed the design doc
+- [x] Reviewed the design doc _(2026-08-03)_
 
 ## Notes
 
@@ -90,6 +91,23 @@ describe('parseTeamMember', () => {
       { heading: '## 1:1 agenda', lines: ['', 'Promo case.', ''] },
     ]);
   });
+
+  it('reads the completion date off a completed task', () => {
+    expect(parseTeamMember(SAMPLE, FALLBACK).completedDates).toEqual({
+      'Reviewed the design doc': '2026-08-03',
+    });
+  });
+
+  it('does not record a completion date for an open or in-progress task', () => {
+    const member = parseTeamMember('## Tasks\n\n- [ ] Upcoming\n- [/] In progress\n', FALLBACK);
+    expect(member.completedDates).toEqual({});
+  });
+
+  it('leaves a hand-checked task with no recorded date rather than guessing one', () => {
+    const member = parseTeamMember('## Tasks\n\n- [x] Checked by hand\n', FALLBACK);
+    expect(member.tasks).toEqual([{ title: 'Checked by hand', status: 'completed' }]);
+    expect(member.completedDates).toEqual({});
+  });
 });
 
 describe('serializeTeamMember', () => {
@@ -106,7 +124,17 @@ describe('serializeTeamMember', () => {
     const output = serializeTeamMember(parseTeamMember(SAMPLE, FALLBACK));
     expect(output).toContain('- [ ] Migrate the queue consumer');
     expect(output).toContain('- [/] Onboarding for the new hire');
-    expect(output).toContain('- [x] Reviewed the design doc');
+    expect(output).toContain('- [x] Reviewed the design doc _(2026-08-03)_');
+  });
+
+  it('omits the date suffix for a completed task with no recorded date', () => {
+    const member: TeamMemberDocument = {
+      ...createTeamMember('alice'),
+      tasks: [{ title: 'Checked by hand', status: 'completed' }],
+    };
+    const output = serializeTeamMember(member);
+    expect(output).toContain('- [x] Checked by hand\n');
+    expect(output).not.toContain('_(');
   });
 
   it('sorts notes chronologically regardless of insertion order', () => {
@@ -173,9 +201,67 @@ describe('createTeamMember', () => {
     expect(member).toEqual({
       person: 'alice',
       tasks: [],
+      completedDates: {},
       notes: [],
       extraFields: {},
       extraSections: [],
     });
+  });
+});
+
+describe('updateCompletedDates', () => {
+  const TODAY = '2026-08-10';
+
+  it('stamps today on a task that just became completed', () => {
+    const previous = [{ title: 'Ship it', status: 'in-progress' as const }];
+    const next = [{ title: 'Ship it', status: 'completed' as const }];
+    expect(updateCompletedDates(previous, {}, next, TODAY)).toEqual({ 'Ship it': TODAY });
+  });
+
+  it('keeps the existing date for a task that was already completed', () => {
+    const previous = [{ title: 'Ship it', status: 'completed' as const }];
+    const next = [{ title: 'Ship it', status: 'completed' as const }];
+    expect(updateCompletedDates(previous, { 'Ship it': '2026-08-01' }, next, TODAY)).toEqual({
+      'Ship it': '2026-08-01',
+    });
+  });
+
+  it('drops the date for a task reopened from completed', () => {
+    const previous = [{ title: 'Ship it', status: 'completed' as const }];
+    const next = [{ title: 'Ship it', status: 'upcoming' as const }];
+    expect(updateCompletedDates(previous, { 'Ship it': '2026-08-01' }, next, TODAY)).toEqual({});
+  });
+
+  it('drops the date for a task that was removed', () => {
+    const previous = [{ title: 'Ship it', status: 'completed' as const }];
+    expect(updateCompletedDates(previous, { 'Ship it': '2026-08-01' }, [], TODAY)).toEqual({});
+  });
+
+  it('re-stamps today for a task completed, reopened, then completed again', () => {
+    // Reopening and finishing again is new work, not a continuation of the
+    // original completion — it should not keep the stale first date.
+    const previous = [{ title: 'Ship it', status: 'in-progress' as const }];
+    const next = [{ title: 'Ship it', status: 'completed' as const }];
+    // Simulate the prior completion's date still sitting around from before
+    // the reopen (the caller would have cleared it on the reopen step, but
+    // this proves `justCompleted` — not "has a stale date" — is what decides).
+    expect(updateCompletedDates(previous, { 'Ship it': '2026-07-01' }, next, TODAY)).toEqual({
+      'Ship it': TODAY,
+    });
+  });
+
+  it('ignores tasks that are not completed', () => {
+    const next = [
+      { title: 'Open', status: 'upcoming' as const },
+      { title: 'Active', status: 'in-progress' as const },
+    ];
+    expect(updateCompletedDates([], {}, next, TODAY)).toEqual({});
+  });
+
+  it('does not mutate the previous dates object', () => {
+    const previousDates = { 'Ship it': '2026-08-01' };
+    const previous = [{ title: 'Ship it', status: 'completed' as const }];
+    updateCompletedDates(previous, previousDates, previous, TODAY);
+    expect(previousDates).toEqual({ 'Ship it': '2026-08-01' });
   });
 });

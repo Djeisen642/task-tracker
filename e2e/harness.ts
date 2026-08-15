@@ -166,3 +166,41 @@ export function dayFile(
     '',
   ].join('\n');
 }
+
+/** A minimal team file, written the way the app writes them. */
+export function teamFile(
+  person: string,
+  tasks: readonly { title: string; marker: ' ' | '/' | 'x'; completedDate?: string }[],
+  notes: readonly { date: string; text: string }[] = [],
+): string {
+  const taskLines =
+    tasks.length > 0
+      ? tasks.map((task) => {
+          const suffix =
+            task.marker === 'x' && task.completedDate !== undefined
+              ? ` _(${task.completedDate})_`
+              : '';
+          return `- [${task.marker}] ${task.title}${suffix}`;
+        })
+      : ['_Nothing tracked yet._'];
+
+  const noteLines =
+    notes.length > 0 ? notes.map((note) => `- ${note.date} — ${note.text}`) : ['_No notes yet._'];
+
+  return [
+    '---',
+    `person: ${person}`,
+    '---',
+    '',
+    `# @${person}`,
+    '',
+    '## Tasks',
+    '',
+    ...taskLines,
+    '',
+    '## Notes',
+    '',
+    ...noteLines,
+    '',
+  ].join('\n');
+}

@@ -236,8 +236,9 @@ function member(
   person: string,
   tasks: TeamMemberDocument['tasks'],
   notes: [string, string][] = [],
+  completedDates: Record<string, string> = {},
 ) {
-  let doc = { ...createTeamMember(person), tasks };
+  let doc = { ...createTeamMember(person), tasks, completedDates };
   for (const [date, text] of notes) doc = addTeamNote(doc, date, text);
   return doc;
 }
@@ -254,8 +255,11 @@ describe('teamWeeklyRollup', () => {
     ],
     [
       ['2026-08-04', 'Shipped the migration script #kudos'],
+      ['2026-08-05', 'Waiting on design review #blocker'],
+      ['2026-08-06', 'Paired with bob on the onboarding checklist'],
       ['2026-07-20', 'Old note outside this week'],
     ],
+    { 'Reviewed the design doc': '2026-08-04' },
   );
   const bob = member('bob', [{ title: 'Onboarding', status: 'upcoming' }]);
 
@@ -272,22 +276,63 @@ describe('teamWeeklyRollup', () => {
     expect(output.indexOf('## @alice')).toBeLessThan(output.indexOf('## @bob'));
   });
 
-  it('lists open and completed tasks per report', () => {
+  it('lists open tasks and tasks completed within the week', () => {
     const output = teamWeeklyRollup([alice], weekStart, weekEnd);
     expect(output).toContain('- Migrate the queue consumer');
-    expect(output).toContain('- Reviewed the design doc');
+    expect(output).toContain('- Reviewed the design doc _(2026-08-04)_');
   });
 
-  it('includes notes logged within the week, excluding those outside it', () => {
+  it('excludes a task completed before the window from Completed', () => {
+    const early = member('dana', [{ title: 'Shipped last week', status: 'completed' }], [], {
+      'Shipped last week': '2026-07-28',
+    });
+    const output = teamWeeklyRollup([early], weekStart, weekEnd);
+    expect(output).not.toContain('Shipped last week');
+    expect(output).toContain('Nothing completed this week');
+  });
+
+  it('excludes a completed task with no recorded date rather than guessing it belongs here', () => {
+    const undated = member('erin', [{ title: 'Checked by hand', status: 'completed' }]);
+    const output = teamWeeklyRollup([undated], weekStart, weekEnd);
+    expect(output).not.toContain('Checked by hand');
+  });
+
+  it('includes ordinary notes logged within the week, excluding those outside it', () => {
     const output = teamWeeklyRollup([alice], weekStart, weekEnd);
-    expect(output).toContain('Shipped the migration script #kudos _(2026-08-04)_');
+    expect(output).toContain('Paired with bob on the onboarding checklist _(2026-08-06)_');
     expect(output).not.toContain('Old note outside this week');
+  });
+
+  it('pulls a kudos-tagged note into its own section, as a bullet', () => {
+    const output = teamWeeklyRollup([alice], weekStart, weekEnd);
+    expect(output).toContain('### Kudos');
+    expect(output).toContain('- Shipped the migration script #kudos _(2026-08-04)_');
+  });
+
+  it('pulls a blocker-tagged note into its own section, as a bullet', () => {
+    const output = teamWeeklyRollup([alice], weekStart, weekEnd);
+    expect(output).toContain('### Blockers');
+    expect(output).toContain('- Waiting on design review #blocker _(2026-08-05)_');
+  });
+
+  it('does not repeat a kudos or blocker note under Notes this week', () => {
+    const output = teamWeeklyRollup([alice], weekStart, weekEnd);
+    const notesSection = output.split('### Notes this week')[1]?.split('### Open')[0] ?? '';
+    expect(notesSection).not.toContain('#kudos');
+    expect(notesSection).not.toContain('#blocker');
+    expect(notesSection).toContain('Paired with bob on the onboarding checklist');
+  });
+
+  it('omits Kudos and Blockers sections entirely when a report has neither this week', () => {
+    const output = teamWeeklyRollup([bob], weekStart, weekEnd);
+    expect(output).not.toContain('### Kudos');
+    expect(output).not.toContain('### Blockers');
   });
 
   it('says so when a report has nothing tracked', () => {
     const output = teamWeeklyRollup([createTeamMember('carol')], weekStart, weekEnd);
     expect(output).toContain('Nothing tracked');
-    expect(output).toContain('Nothing marked complete');
+    expect(output).toContain('Nothing completed this week');
     expect(output).toContain('Nothing logged this week');
   });
 

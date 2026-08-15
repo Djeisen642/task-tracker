@@ -22,12 +22,20 @@
  *
  * - [ ] Migrate the queue consumer
  * - [/] Onboarding for the new hire
+ * - [x] Reviewed the design doc _(2026-08-03)_
  *
  * ## Notes
  *
  * - 2026-08-10 — Shipped the migration script, unblocked the release #kudos
  * - 2026-08-12 — Waiting on design review before starting the API work #blocker
  * ```
+ *
+ * A completed task carries the date it was completed, in the same `_(date)_`
+ * shape the weekly rollup already uses for a finished item. This is what lets
+ * the rollup show "completed *this week*" instead of every completion the
+ * file has ever recorded — a personal day file gets this for free because
+ * each day is its own file, but one report's tasks live in one file for as
+ * long as they're a report, so completion needs its own timestamp.
  */
 
 import type { DateKey } from '../dates.ts';
@@ -45,6 +53,13 @@ export interface TeamMemberDocument {
   /** Lowercase handle, matching the character set `@mentions` extract. */
   person: string;
   tasks: Task[];
+  /**
+   * The day each currently-completed task was marked done, keyed by title.
+   * Absent for an open task, and for a completed one whose date wasn't
+   * recorded (a hand-checked box, say) — undated completions are simply not
+   * attributable to any particular week.
+   */
+  completedDates: Record<string, DateKey>;
   notes: TeamNote[];
   /** Frontmatter keys we don't own, kept so hand-added keys survive a write. */
   extraFields: Record<string, string>;
@@ -70,29 +85,45 @@ const STATUS_TO_MARKER: Record<TaskStatus, string> = {
 };
 
 const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
+/** A trailing `_(2026-08-03)_` on a completed task line — see the module doc. */
+const COMPLETED_DATE_PATTERN = /\s*_\((\d{4}-\d{2}-\d{2})\)_\s*$/;
 /** `- 2026-08-10 — text`, accepting an em dash, en dash or hyphen as the separator. */
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{4}-\d{2}-\d{2})\s*[—–-]\s*(.*)$/;
 
 /** Owned frontmatter keys, in the order they're written. */
 const OWNED_FIELDS = ['person'];
 
-function parseTasks(lines: readonly string[]): Task[] {
+function parseTasks(lines: readonly string[]): {
+  tasks: Task[];
+  completedDates: Record<string, DateKey>;
+} {
   const tasks: Task[] = [];
+  const completedDates: Record<string, DateKey> = {};
 
   for (const line of lines) {
     const match = TASK_PATTERN.exec(line);
     if (match === null) continue;
 
     const status = MARKER_TO_STATUS[match[1] ?? ''];
-    const title = (match[2] ?? '').trim();
+    let title = (match[2] ?? '').trim();
     // An unknown marker means someone is using a convention we don't model;
     // skipping keeps the line intact on the next write rather than guessing.
     if (status === undefined || title === '') continue;
 
+    if (status === 'completed') {
+      const dateMatch = COMPLETED_DATE_PATTERN.exec(title);
+      if (dateMatch !== null) {
+        title = title.slice(0, dateMatch.index).trim();
+        const date = dateMatch[1];
+        if (date !== undefined && title !== '') completedDates[title] = date;
+      }
+    }
+
+    if (title === '') continue;
     tasks.push({ title, status });
   }
 
-  return tasks;
+  return { tasks, completedDates };
 }
 
 function parseNotes(lines: readonly string[]): TeamNote[] {
@@ -127,12 +158,13 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
   }
 
   let tasks: Task[] = [];
+  let completedDates: Record<string, DateKey> = {};
   let notes: TeamNote[] = [];
   const extraSections: ExtraSection[] = [];
 
   for (const section of sections) {
     if (section.heading === TASKS_HEADING) {
-      tasks = parseTasks(section.lines);
+      ({ tasks, completedDates } = parseTasks(section.lines));
     } else if (section.heading === NOTES_HEADING) {
       notes = parseNotes(section.lines);
     } else {
@@ -143,6 +175,7 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
   return {
     person: fields.person ?? fallback.person,
     tasks,
+    completedDates,
     notes,
     extraFields,
     extraSections,
@@ -158,9 +191,11 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
 
   const blocks: string[] = [`# @${member.person}`];
 
-  const taskLines = member.tasks.map(
-    (task) => `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}`,
-  );
+  const taskLines = member.tasks.map((task) => {
+    const date = task.status === 'completed' ? member.completedDates[task.title] : undefined;
+    const suffix = date === undefined ? '' : ` _(${date})_`;
+    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
+  });
   blocks.push(
     [TASKS_HEADING, '', ...(taskLines.length > 0 ? taskLines : ['_Nothing tracked yet._'])].join(
       '\n',
@@ -183,7 +218,35 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
 
 /** A fresh, empty team document for `person`. */
 export function createTeamMember(person: string): TeamMemberDocument {
-  return { person, tasks: [], notes: [], extraFields: {}, extraSections: [] };
+  return { person, tasks: [], completedDates: {}, notes: [], extraFields: {}, extraSections: [] };
+}
+
+/**
+ * Recompute completion dates after a task list changes.
+ *
+ * A task that just became completed (it wasn't, a moment ago) is stamped
+ * `today`. One that moved off completed — reopened, or removed outright —
+ * loses its date; there's nothing to carry forward. A task that was already
+ * completed and still is keeps whatever date it already had, rather than
+ * getting re-stamped on every unrelated edit to the list.
+ */
+export function updateCompletedDates(
+  previousTasks: readonly Task[],
+  previousDates: Readonly<Record<string, DateKey>>,
+  nextTasks: readonly Task[],
+  today: DateKey,
+): Record<string, DateKey> {
+  const previousStatus = new Map(previousTasks.map((task) => [task.title, task.status]));
+  const dates: Record<string, DateKey> = {};
+
+  for (const task of nextTasks) {
+    if (task.status !== 'completed') continue;
+
+    const justCompleted = previousStatus.get(task.title) !== 'completed';
+    dates[task.title] = justCompleted ? today : (previousDates[task.title] ?? today);
+  }
+
+  return dates;
 }
 
 /** Append a dated note. Returns a new document; the input is never mutated. */

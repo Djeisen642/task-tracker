@@ -28,7 +28,7 @@ import {
   weeklyRollup,
   weekFileName,
 } from './lib/markdown/rollup.ts';
-import { addTeamNote, type TeamMemberDocument } from './lib/markdown/team.ts';
+import { addTeamNote, updateCompletedDates, type TeamMemberDocument } from './lib/markdown/team.ts';
 import {
   describeCheckIn,
   describeNextWorkingDay,
@@ -1075,10 +1075,24 @@ class CheckInController {
     return this.teamMember?.tasks ?? [];
   }
 
+  /**
+   * Apply an edited task list, recomputing which completions have a date.
+   *
+   * Every task mutation — toggling status, adding, removing — flows through
+   * here, which is what makes this the one place `completedDates` needs to
+   * stay in sync rather than something each caller has to remember to do.
+   */
   private updateTeamTasks(tasks: Task[]): void {
     if (this.teamMember === null) return;
 
-    this.teamMember = { ...this.teamMember, tasks };
+    const completedDates = updateCompletedDates(
+      this.teamMember.tasks,
+      this.teamMember.completedDates,
+      tasks,
+      toDateKey(new Date()),
+    );
+
+    this.teamMember = { ...this.teamMember, tasks, completedDates };
     this.renderTeamMember();
     this.saveTeamMember();
   }

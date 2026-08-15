@@ -107,6 +107,7 @@ person: alice
 
 - [ ] Migrate the queue consumer
 - [/] Onboarding for the new hire
+- [x] Reviewed the design doc _(2026-08-03)_
 
 ## Notes
 
@@ -116,11 +117,20 @@ person: alice
 
 The task markers and \`#tag\` conventions are identical to the day file. The one
 difference: a team note's date is the day it was logged, not a timestamp —
-this file spans many days, not one.
+this file spans many days, not one. A **completed** task also carries the date
+it was finished, as a trailing \`_(YYYY-MM-DD)_\` — that's what lets the weekly
+rollup show completions scoped to one week instead of the report's whole
+history. A completed task with no such date (hand-checked, say) isn't
+attributable to any particular week and won't appear in a weekly rollup, even
+though it's still marked done in this file.
 
 \`YYYY-Www-team.md\` is the weekly rollup across every tracked report: one
-section per person, with that week's notes plus their current open and
-completed tasks. It is the manager-perspective sibling of \`YYYY-Www.md\`.
+section per person, with that week's notes, that week's completions, and
+their currently open tasks. \`#kudos\`- and \`#blocker\`-tagged notes from that
+week are pulled into their own \`### Kudos\`/\`### Blockers\` subsections rather
+than left inside \`### Notes this week\` — when this file is being read for a
+status report, those are usually the headline, not one line among many. It is
+the manager-perspective sibling of \`YYYY-Www.md\`.
 
 ## Answering questions about this vault
 
@@ -131,6 +141,14 @@ completed tasks. It is the manager-perspective sibling of \`YYYY-Www.md\`.
 - **"How's my team doing this week?" / "Summarize my team's week"** — read that
   week's \`YYYY-Www-team.md\` rollup if it exists; fall back to reading every
   \`team.<person>.md\` file directly.
+- **"Write me a status report for my boss"** — start from \`YYYY-Www-team.md\`.
+  Lead with each report's \`### Kudos\` — that's the recognition-worthy work, and
+  usually what a status report is actually for. Mention \`### Blockers\` next, as
+  risks to flag. \`### Completed\` is the concrete "what shipped" list for the
+  week; treat \`### Open\` as in-flight context, not a commitment — it says
+  nothing about *when* it'll be done. Note explicitly if a report has nothing
+  in one of these sections rather than omitting them silently; a quiet week is
+  worth saying so, not worth inventing content to fill.
 - **"Help me write my year-end review"** — gather every \`#kudos\` note plus all
   completed tasks across the period. The completed tasks are the *what*; the
   notes are the *why it mattered*. For a report, add their \`team.<person>.md\`
