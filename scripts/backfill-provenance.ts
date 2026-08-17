@@ -107,7 +107,19 @@ interface Loaded {
 }
 
 async function loadDays(dir: string): Promise<Loaded[]> {
-  const entries = await readdir(dir);
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    // Mistyping the vault path is the likeliest way to misuse this, and a raw
+    // ENOENT stack trace reads like the script is broken rather than the path.
+    throw new Error(
+      `Can't read a vault at ${dir}\n` +
+        'Pass the folder holding your YYYY-MM-DD.md files — by default\n' +
+        'Documents/TaskTracker, or whatever `vaultDir` in settings.json points at.',
+    );
+  }
+
   const loaded: Loaded[] = [];
 
   for (const name of entries.sort()) {
@@ -279,5 +291,10 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  }
 }
