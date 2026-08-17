@@ -168,6 +168,44 @@ test("carries yesterday's unfinished work into today", async ({ page }) => {
   await expect(titles).toHaveText(['Carried over', 'Also carried']);
   // The marker that says "this one keeps slipping".
   await expect(page.locator('.task').first()).toHaveClass(/is-carried/);
+
+  // And the day file records when each one first appeared, so the span from
+  // start to finish is readable off a single line later.
+  await page.click('#done');
+  const written = await readVaultFile(page, '2026-08-03.md');
+  expect(written).toContain('- [/] Carried over _(added 2026-07-31)_');
+  expect(written).toContain('- [ ] Also carried _(added 2026-07-31)_');
+});
+
+test('still marks slipped work as carried after a restart', async ({ page }) => {
+  // The regression: "carried" was a flag set at carry-over time and never
+  // written to the file, so a relaunch mid-day re-read today's tasks with the
+  // flag gone and the marker silently vanished from exactly the work it exists
+  // to highlight. It is derived from the recorded date now.
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 10, 45),
+    files: {
+      '2026-08-03.md': dayFile('2026-08-03', [
+        { title: 'Slipped from Friday', marker: '/', added: '2026-07-31' },
+        { title: 'Started today', marker: ' ' },
+      ]),
+    },
+  });
+
+  await expect(page.locator('.task').first()).toHaveClass(/is-carried/);
+  await expect(page.locator('.task').nth(1)).not.toHaveClass(/is-carried/);
+});
+
+test('a task added today is not annotated as if it predated the day', async ({ page }) => {
+  await startApp(page);
+
+  await page.fill('#task-input', 'Started this morning');
+  await page.press('#task-input', 'Enter');
+  await page.click('#done');
+
+  const written = await readVaultFile(page, '2026-08-03.md');
+  expect(written).toContain('- [ ] Started this morning\n');
+  expect(written).not.toContain('Started this morning _(added');
 });
 
 test('does not re-prompt for a check-in completed before a restart', async ({ page }) => {

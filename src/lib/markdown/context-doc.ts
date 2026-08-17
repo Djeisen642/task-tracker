@@ -31,11 +31,18 @@ are preserved — but changes to this file will be overwritten.
 
 | Pattern              | What it is                                                      |
 | --------------------- | ---------------------------------------------------------------- |
-| \`YYYY-MM-DD.md\`       | One workday: its task list and timestamped notes.                |
-| \`YYYY-Www.md\`         | A generated weekly rollup (completed work, open items, kudos).   |
-| \`team.<person>.md\`    | A manager's running notes on one direct report. Only present when the user tracks reports. |
-| \`YYYY-Www-team.md\`    | A generated weekly rollup across every tracked report.           |
+| \`YYYY-MM-DD.md\`       | **Source.** One workday: its task list and timestamped notes.    |
+| \`team.<person>.md\`    | **Source.** A manager's running notes on one direct report. Only present when the user tracks reports. |
+| \`YYYY-Www.md\`         | *Derived.* A generated weekly rollup (completed work, open items, kudos). |
+| \`YYYY-Www-team.md\`    | *Derived.* A generated weekly rollup across every tracked report. |
 | \`CONTEXT.md\`          | This file.                                                        |
+
+**Source vs derived matters when you are counting.** The rollups contain no
+information that isn't already in the day and team files — they are rebuilt from
+them on every check-in. Read a rollup as a shortcut when you want one week, but
+when you are aggregating a longer period, read the source files only. Counting
+both double-counts every completed task, and a rollup quoted as if it were a
+record of its own is a citation of nothing.
 
 ## Day file format
 
@@ -51,9 +58,9 @@ last_check_in: 14:00
 
 ## Tasks
 
-- [ ] Draft the migration RFC
+- [ ] Draft the migration RFC _(added 2026-07-29)_
 - [/] Ship the rollback path
-- [x] Review the release checklist
+- [x] Review the release checklist _(added 2026-07-31)_
 
 ## Notes
 
@@ -76,6 +83,29 @@ happened — read the notes for that.
 Open tasks (upcoming and in progress) roll over into the next day's file.
 Completed tasks stay in the day that finished them — so to find when something
 was completed, look for the day whose file marks it \`[x]\`.
+
+### Task dates — how long something took
+
+A task carries \`_(added YYYY-MM-DD)_\` when it first appeared **before** the file
+it is sitting in. A task with no such suffix was added on the file's own date.
+So, for any task line, without opening another file:
+
+- **When it started** — the \`_(added …)_\` date, or this file's date if absent.
+- **When it finished** — this file's date, if the task is marked \`[x]\`.
+- **How long it took** — the difference between those two.
+- **Whether it slipped** — the suffix being present at all. A task carrying
+  \`_(added 2026-07-29)_\` in the file for 2026-08-05 was open across five
+  working days.
+
+Two cautions. Elapsed days are *calendar* days between first sighting and
+completion, not effort — a task added Friday and finished Monday spans three
+days of which two were the weekend, and one open across a fortnight may have
+been untouched for most of it. Say "open for N days", not "took N days of
+work". And an \`added\` date is a *floor*: it is the earliest day the app can
+prove the task existed. Files predating this convention, and tasks introduced by
+a hand edit, are stamped with the day they were first carried forward, which may
+be later than the day the work truly began. Treat a long span as reliable and a
+short one as a lower bound.
 
 ### Notes
 
@@ -118,7 +148,11 @@ person: alice
 The task markers and \`#tag\` conventions are identical to the day file. The one
 difference: a team note's date is the day it was logged, not a timestamp —
 this file spans many days, not one. A **completed** task also carries the date
-it was finished, as a trailing \`_(YYYY-MM-DD)_\` — that's what lets the weekly
+it was finished, as a trailing unlabelled \`_(YYYY-MM-DD)_\`. Note that this is
+the mirror image of the day file's \`_(added …)_\`: here the bare date is when
+the task **ended**, because this file has no date of its own to imply it; in a
+day file the labelled date is when the task **began**, because the filename
+already says when it ended. Read the label, not the shape. That's what lets the weekly
 rollup show completions scoped to one week instead of the report's whole
 history. A completed task with no such date (hand-checked, say) isn't
 attributable to any particular week and won't appear in a weekly rollup, even
@@ -149,6 +183,11 @@ the manager-perspective sibling of \`YYYY-Www.md\`.
   nothing about *when* it'll be done. Note explicitly if a report has nothing
   in one of these sections rather than omitting them silently; a quiet week is
   worth saying so, not worth inventing content to fill.
+- **"What's been dragging?" / "What took longest?"** — compare each completed
+  task's \`_(added …)_\` date with the date of the file that marks it \`[x]\`. For
+  work still open, compare against today. Read the \`## Notes\` around a long
+  span before concluding anything: the notes usually say whether it was blocked,
+  deprioritised, or simply large, and those are different stories.
 - **"Help me write my year-end review"** — gather every \`#kudos\` note plus all
   completed tasks across the period. The completed tasks are the *what*; the
   notes are the *why it mattered*. For a report, add their \`team.<person>.md\`

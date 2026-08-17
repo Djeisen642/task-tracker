@@ -21,7 +21,7 @@
  *
  * ## Tasks
  *
- * - [ ] Draft the RFC
+ * - [ ] Draft the RFC _(added 2026-07-30)_
  * - [/] Ship the migration rollback
  * - [x] Review the release checklist
  *
@@ -29,6 +29,15 @@
  *
  * - 10:15 — @alice unblocked the release single-handedly #kudos
  * ```
+ *
+ * The `_(added …)_` suffix appears only when a task predates the file it is
+ * sitting in, so its presence *is* the carried-over marker and a clean day of
+ * fresh work stays free of annotation. Combined with the file's own date — the
+ * day an `[x]` was finished — one line answers "how long did this take" without
+ * reading a single other file. It is labelled rather than the bare `_(date)_`
+ * the team file uses for *completion*, because the two files sit in one folder
+ * and an unlabelled date that means opposite things in each is a trap for
+ * whoever reads the vault next.
  */
 
 import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
@@ -86,13 +95,20 @@ const STATUS_TO_MARKER: Record<TaskStatus, string> = {
 };
 
 const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
+/** A trailing `_(added 2026-07-30)_` — see the module doc. */
+const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
 /** `- 10:15 — text`, accepting an em dash, en dash or hyphen as the separator. */
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 
 /** Owned frontmatter keys, in the order they're written. */
 const OWNED_FIELDS = ['date', 'work_start', 'work_end', 'last_check_in'];
 
-function parseTasks(lines: readonly string[]): Task[] {
+/**
+ * `date` is the file's own date, and is the default `added` for any task
+ * without the suffix: an unannotated line means "first appeared here", which is
+ * what every file written before the field existed is truthfully saying.
+ */
+function parseTasks(lines: readonly string[], date: DateKey): Task[] {
   const tasks: Task[] = [];
 
   for (const line of lines) {
@@ -100,12 +116,24 @@ function parseTasks(lines: readonly string[]): Task[] {
     if (match === null) continue;
 
     const status = MARKER_TO_STATUS[match[1] ?? ''];
-    const title = (match[2] ?? '').trim();
+    let title = (match[2] ?? '').trim();
     // An unknown marker means someone is using a convention we don't model;
     // skipping keeps the line intact on the next write rather than guessing.
     if (status === undefined || title === '') continue;
 
-    tasks.push({ title, status });
+    let added = date;
+    const dateMatch = ADDED_DATE_PATTERN.exec(title);
+    if (dateMatch !== null) {
+      const annotated = dateMatch[1];
+      const stripped = title.slice(0, dateMatch.index).trim();
+      // A suffix with nothing in front of it is someone's prose, not a task.
+      if (annotated !== undefined && stripped !== '') {
+        title = stripped;
+        added = annotated;
+      }
+    }
+
+    tasks.push({ title, status, added });
   }
 
   return tasks;
@@ -146,13 +174,15 @@ export function parseDay(
     if (!OWNED_FIELDS.includes(key)) extraFields[key] = value;
   }
 
+  const date = fields.date ?? fallback.date;
+
   let tasks: Task[] = [];
   let notes: Note[] = [];
   const extraSections: ExtraSection[] = [];
 
   for (const section of sections) {
     if (section.heading === TASKS_HEADING) {
-      tasks = parseTasks(section.lines);
+      tasks = parseTasks(section.lines, date);
     } else if (section.heading === NOTES_HEADING) {
       notes = parseNotes(section.lines);
     } else {
@@ -167,7 +197,7 @@ export function parseDay(
     lastCheckIn !== undefined && parseClock(lastCheckIn) !== null ? lastCheckIn : undefined;
 
   return {
-    date: fields.date ?? fallback.date,
+    date,
     workStart: fields.work_start ?? fallback.workStart,
     workEnd: fields.work_end ?? fallback.workEnd,
     ...(validLastCheckIn === undefined ? {} : { lastCheckIn: validLastCheckIn }),
@@ -193,9 +223,12 @@ export function serializeDay(day: DayDocument): string {
 
   const blocks: string[] = [`# ${heading}`];
 
-  const taskLines = day.tasks.map(
-    (task) => `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}`,
-  );
+  const taskLines = day.tasks.map((task) => {
+    // Only when it differs from this file's own date — see the module doc.
+    const carried = task.added !== undefined && task.added !== day.date;
+    const suffix = carried ? ` _(added ${String(task.added)})_` : '';
+    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
+  });
   blocks.push(
     [TASKS_HEADING, '', ...(taskLines.length > 0 ? taskLines : ['_No tasks yet._'])].join('\n'),
   );
@@ -225,7 +258,8 @@ export function createDay(
     date,
     workStart,
     workEnd,
-    tasks: [...tasks],
+    // Anything arriving without provenance first appeared here, by definition.
+    tasks: tasks.map((task) => ({ ...task, added: task.added ?? date })),
     notes: [],
     extraFields: {},
     extraSections: [],

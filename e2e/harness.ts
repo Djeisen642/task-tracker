@@ -131,10 +131,15 @@ export async function advanceMinutes(page: Page, minutes: number): Promise<void>
   await page.clock.runFor(minutes * 60_000);
 }
 
-/** A minimal day file, written the way the app writes them. */
+/**
+ * A minimal day file, written the way the app writes them.
+ *
+ * `added` puts the `_(added …)_` suffix on a task, which is how a file records
+ * that the task predates it. Omit it for work that started on `date`.
+ */
 export function dayFile(
   date: string,
-  tasks: readonly { title: string; marker: ' ' | '/' | 'x' }[],
+  tasks: readonly { title: string; marker: ' ' | '/' | 'x'; added?: string }[],
   extra: { lastCheckIn?: string } = {},
 ): string {
   const frontmatter = [
@@ -148,7 +153,10 @@ export function dayFile(
 
   const taskLines =
     tasks.length > 0
-      ? tasks.map((task) => `- [${task.marker}] ${task.title}`)
+      ? tasks.map(
+          (task) =>
+            `- [${task.marker}] ${task.title}${task.added === undefined ? '' : ` _(added ${task.added})_`}`,
+        )
       : ['_No tasks yet._'];
 
   return [

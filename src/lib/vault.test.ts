@@ -160,7 +160,9 @@ describe('readDay / writeDay', () => {
     await writeDay(vault, day);
 
     const loaded = await readDay(vault, '2026-08-02', HOURS.start, HOURS.end);
-    expect(loaded?.tasks).toEqual([{ title: 'Draft the RFC', status: 'upcoming' }]);
+    expect(loaded?.tasks).toEqual([
+      { title: 'Draft the RFC', status: 'upcoming', added: '2026-08-02' },
+    ]);
   });
 
   it('writes to the expected filename', async () => {
@@ -176,7 +178,7 @@ describe('openDay', () => {
       '2026-08-04.md': dayFile('2026-08-04', [{ title: 'Existing', status: 'in-progress' }]),
     });
     const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end);
-    expect(day.tasks).toEqual([{ title: 'Existing', status: 'in-progress' }]);
+    expect(day.tasks).toEqual([{ title: 'Existing', status: 'in-progress', added: '2026-08-04' }]);
   });
 
   it('creates an empty day when the vault is empty', async () => {
@@ -196,7 +198,21 @@ describe('openDay', () => {
 
     const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end);
     expect(day.tasks.map((task) => task.title)).toEqual(['Carried', 'Planned']);
-    expect(day.tasks.every((task) => task.carriedOver === true)).toBe(true);
+    expect(day.tasks.every((task) => task.added === '2026-08-03')).toBe(true);
+  });
+
+  it('keeps the original added date across a multi-day carry-over chain', async () => {
+    const vault = new MemoryVault({
+      '2026-08-03.md': dayFile('2026-08-03', [{ title: 'Long runner', status: 'in-progress' }]),
+    });
+
+    for (const date of ['2026-08-04', '2026-08-05', '2026-08-06']) {
+      await writeDay(vault, await openDay(vault, date, HOURS.start, HOURS.end));
+    }
+
+    const day = await openDay(vault, '2026-08-06', HOURS.start, HOURS.end);
+    expect(day.tasks[0]?.added).toBe('2026-08-03');
+    expect(vault.snapshot()['2026-08-06.md']).toContain('_(added 2026-08-03)_');
   });
 
   it('does not carry over from beyond the horizon', async () => {

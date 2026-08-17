@@ -34,29 +34,46 @@ describe('parseDay', () => {
 
   it('reads all three task markers', () => {
     expect(parseDay(SAMPLE, FALLBACK).tasks).toEqual([
-      { title: 'Draft the RFC', status: 'upcoming' },
-      { title: 'Ship the rollback path', status: 'in-progress' },
-      { title: 'Review the checklist', status: 'completed' },
+      { title: 'Draft the RFC', status: 'upcoming', added: '2026-08-02' },
+      { title: 'Ship the rollback path', status: 'in-progress', added: '2026-08-02' },
+      { title: 'Review the checklist', status: 'completed', added: '2026-08-02' },
     ]);
   });
 
   it('accepts an uppercase completed marker', () => {
     const day = parseDay('## Tasks\n\n- [X] Done\n', FALLBACK);
-    expect(day.tasks).toEqual([{ title: 'Done', status: 'completed' }]);
+    expect(day.tasks).toEqual([{ title: 'Done', status: 'completed', added: '2026-08-02' }]);
   });
 
   it('accepts `*` bullets as well as `-`', () => {
     const day = parseDay('## Tasks\n\n* [ ] Starred\n', FALLBACK);
-    expect(day.tasks).toEqual([{ title: 'Starred', status: 'upcoming' }]);
+    expect(day.tasks).toEqual([{ title: 'Starred', status: 'upcoming', added: '2026-08-02' }]);
   });
 
   it('skips an unknown marker rather than guessing at its meaning', () => {
     const day = parseDay('## Tasks\n\n- [?] Mystery\n- [ ] Real\n', FALLBACK);
-    expect(day.tasks).toEqual([{ title: 'Real', status: 'upcoming' }]);
+    expect(day.tasks).toEqual([{ title: 'Real', status: 'upcoming', added: '2026-08-02' }]);
   });
 
   it('skips a checkbox with no title', () => {
     expect(parseDay('## Tasks\n\n- [ ]   \n', FALLBACK).tasks).toEqual([]);
+  });
+
+  it('reads the added date off a carried task', () => {
+    const day = parseDay('## Tasks\n\n- [/] Ship it _(added 2026-07-29)_\n', FALLBACK);
+    expect(day.tasks).toEqual([{ title: 'Ship it', status: 'in-progress', added: '2026-07-29' }]);
+  });
+
+  it("defaults an unannotated task to the file's own date", () => {
+    const day = parseDay('---\ndate: 2026-08-09\n---\n\n## Tasks\n\n- [ ] Fresh\n', FALLBACK);
+    expect(day.tasks[0]?.added).toBe('2026-08-09');
+  });
+
+  it('keeps a lone date suffix as prose rather than reading it as a task title', () => {
+    const day = parseDay('## Tasks\n\n- [ ] _(added 2026-07-29)_\n', FALLBACK);
+    expect(day.tasks).toEqual([
+      { title: '_(added 2026-07-29)_', status: 'upcoming', added: '2026-08-02' },
+    ]);
   });
 
   it('reads timestamped notes', () => {
@@ -147,6 +164,28 @@ describe('serializeDay', () => {
     expect(output).toContain('- [x] Review the checklist');
   });
 
+  it('annotates only the tasks that predate the file', () => {
+    const day = createDay('2026-08-05', '09:00', '17:00', [
+      { title: 'Carried', status: 'in-progress', added: '2026-08-03' },
+      { title: 'Fresh', status: 'upcoming', added: '2026-08-05' },
+    ]);
+
+    const output = serializeDay(day);
+    expect(output).toContain('- [/] Carried _(added 2026-08-03)_');
+    expect(output).toContain('- [ ] Fresh\n');
+    expect(output).not.toContain('- [ ] Fresh _(added');
+  });
+
+  it('round-trips a carried task without drifting its date', () => {
+    const day = createDay('2026-08-05', '09:00', '17:00', [
+      { title: 'Carried', status: 'in-progress', added: '2026-08-03' },
+    ]);
+    const round = parseDay(serializeDay(day), FALLBACK);
+
+    expect(round).toEqual(day);
+    expect(serializeDay(round)).toBe(serializeDay(day));
+  });
+
   it('sorts notes chronologically regardless of insertion order', () => {
     let day = createDay('2026-08-02', '09:00', '17:00');
     day = addNote(day, '15:00', 'later');
@@ -213,9 +252,16 @@ describe('addNote', () => {
 describe('createDay', () => {
   it('seeds tasks carried in from a previous day', () => {
     const day = createDay('2026-08-03', '09:00', '17:00', [
-      { title: 'Carried', status: 'in-progress', carriedOver: true },
+      { title: 'Carried', status: 'in-progress', added: '2026-08-02' },
     ]);
     expect(day.tasks).toHaveLength(1);
-    expect(serializeDay(day)).toContain('- [/] Carried');
+    expect(serializeDay(day)).toContain('- [/] Carried _(added 2026-08-02)_');
+  });
+
+  it("stamps an undated task with the new day's own date", () => {
+    const day = createDay('2026-08-03', '09:00', '17:00', [
+      { title: 'Undated', status: 'upcoming' },
+    ]);
+    expect(day.tasks[0]?.added).toBe('2026-08-03');
   });
 });

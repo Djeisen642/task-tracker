@@ -147,6 +147,16 @@ docs/
 - **Hand edits survive.** `parseDay`/`serializeDay` preserve unowned sections and
   frontmatter keys verbatim. You or an agent may edit a day file directly, and
   the next app write must not eat it.
+- **A task keeps the date it first appeared; the suffix is written only when it
+  outlives that day.** `_(added YYYY-MM-DD)_` on a day-file task means "this
+  predates this file", so its presence _is_ the carried-over marker and a day of
+  fresh work stays unannotated. The file's own date is when an `[x]` finished, so
+  one line yields start, finish and duration — the one fact about a task that was
+  otherwise unrecoverable except by diffing consecutive files and matching on
+  title. `carriedOver` used to be a flag set at carry-over time and was silently
+  lost on every restart; it is now derived by `isCarriedOver`. Don't reintroduce
+  a stored flag, and don't switch to the team file's unlabelled `_(date)_` — the
+  two files share a folder, and there the bare date means _completed_.
 - **Writes are atomic and serialized.** Rust writes to a temp file and renames
   (a day file is the only copy of that day's notes); `main.ts` chains every save
   through `this.writes` so concurrent edits can't interleave.

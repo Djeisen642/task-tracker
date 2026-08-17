@@ -147,7 +147,7 @@ export async function openDay(
   }
 
   const previous = await readDay(vault, previousKey, workStart, workEnd);
-  const carried = previous === null ? [] : carryOverTasks(previous.tasks);
+  const carried = previous === null ? [] : carryOverTasks(previous.tasks, previousKey);
   return createDay(date, workStart, workEnd, carried);
 }
 
