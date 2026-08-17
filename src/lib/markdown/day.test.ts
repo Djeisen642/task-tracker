@@ -265,3 +265,46 @@ describe('createDay', () => {
     expect(day.tasks[0]?.added).toBe('2026-08-03');
   });
 });
+
+describe('compatibility with files this format did not write', () => {
+  // Exactly as the app wrote day files before `added` existed: no suffixes.
+  const OLD_FILE = `---
+date: 2026-08-04
+work_start: 09:00
+work_end: 17:00
+---
+
+# Tuesday, 4 August 2026
+
+## Tasks
+
+- [/] Long-running migration
+- [ ] Fresh thing
+`;
+
+  it('reads a pre-suffix file without loss, dating each task to the file', () => {
+    expect(parseDay(OLD_FILE, FALLBACK).tasks).toEqual([
+      { title: 'Long-running migration', status: 'in-progress', added: '2026-08-04' },
+      { title: 'Fresh thing', status: 'upcoming', added: '2026-08-04' },
+    ]);
+  });
+
+  it('rewrites a pre-suffix file without adding noise to it', () => {
+    const output = serializeDay(parseDay(OLD_FILE, FALLBACK));
+    expect(output).not.toContain('_(added');
+    expect(output).toContain('- [/] Long-running migration');
+  });
+
+  it('reclaims a suffix that an older build swallowed into the title', () => {
+    // An older build has no suffix pattern, so it parses the annotation as part
+    // of the title and writes it back verbatim. Reading that file must recover
+    // the date rather than leave it stuck in the title forever.
+    const mangled =
+      '---\ndate: 2026-08-06\n---\n\n## Tasks\n\n- [/] Migrate _(added 2026-08-04)_\n';
+
+    expect(parseDay(mangled, FALLBACK).tasks).toEqual([
+      { title: 'Migrate', status: 'in-progress', added: '2026-08-04' },
+    ]);
+    expect(serializeDay(parseDay(mangled, FALLBACK))).not.toContain('_(added 2026-08-04)_ _(added');
+  });
+});
