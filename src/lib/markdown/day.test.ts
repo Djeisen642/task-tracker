@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { addNote, createDay, parseDay, serializeDay, type DayDocument } from './day.ts';
+import {
+  addNote,
+  createDay,
+  DAY_FORMAT_VERSION,
+  parseDay,
+  serializeDay,
+  type DayDocument,
+} from './day.ts';
 
 const FALLBACK = { date: '2026-08-02', workStart: '09:00', workEnd: '17:00' };
 
@@ -263,6 +270,66 @@ describe('createDay', () => {
       { title: 'Undated', status: 'upcoming' },
     ]);
     expect(day.tasks[0]?.added).toBe('2026-08-03');
+  });
+});
+
+describe('format version', () => {
+  it('treats a file with no format key as version 1', () => {
+    expect(parseDay(SAMPLE, FALLBACK).formatVersion).toBe(1);
+  });
+
+  it('stamps a file the app creates with the current version', () => {
+    const day = createDay('2026-08-02', '09:00', '17:00');
+    expect(day.formatVersion).toBe(DAY_FORMAT_VERSION);
+    expect(serializeDay(day)).toContain('format: 2');
+  });
+
+  it('never writes `format: 1` — version 1 is the absence of the key', () => {
+    const day = parseDay(SAMPLE, FALLBACK);
+    expect(serializeDay(day)).not.toContain('format:');
+  });
+
+  it('does not upgrade a legacy file just because the app edited it', () => {
+    // The whole point: an unannotated task in a v2 file is a claim that it
+    // started that day. Stamping v2 onto a file written before provenance
+    // existed would manufacture that claim for tasks we know nothing about.
+    const edited = addNote(parseDay(SAMPLE, FALLBACK), '11:00', 'still legacy');
+    const round = parseDay(serializeDay(edited), FALLBACK);
+
+    expect(round.formatVersion).toBe(1);
+    expect(serializeDay(edited)).not.toContain('format:');
+  });
+
+  it('preserves a version newer than this build understands', () => {
+    // Downgrading must not strip a future format's marker and leave the file
+    // claiming to be something it is not.
+    const day = parseDay('---\nformat: 7\ndate: 2026-08-02\n---\n', FALLBACK);
+    expect(day.formatVersion).toBe(7);
+    expect(serializeDay(day)).toContain('format: 7');
+  });
+
+  it('falls back to version 1 for a corrupt version rather than assuming the best', () => {
+    for (const raw of ['banana', '', '2.5', '-3']) {
+      expect(parseDay(`---\nformat: ${raw}\ndate: 2026-08-02\n---\n`, FALLBACK).formatVersion).toBe(
+        1,
+      );
+    }
+  });
+
+  it('does not leak the version into unowned fields', () => {
+    const day = parseDay('---\nformat: 2\ndate: 2026-08-02\n---\n', FALLBACK);
+    expect(day.extraFields).toEqual({});
+  });
+
+  it('round-trips at every version it can encounter', () => {
+    for (const source of [
+      SAMPLE,
+      serializeDay(createDay('2026-08-02', '09:00', '17:00')),
+      '---\nformat: 7\ndate: 2026-08-02\n---\n',
+    ]) {
+      const day = parseDay(source, FALLBACK);
+      expect(parseDay(serializeDay(day), FALLBACK)).toEqual(day);
+    }
   });
 });
 

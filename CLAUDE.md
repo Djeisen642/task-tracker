@@ -157,6 +157,15 @@ docs/
   lost on every restart; it is now derived by `isCarriedOver`. Don't reintroduce
   a stored flag, and don't switch to the team file's unlabelled `_(date)_` — the
   two files share a folder, and there the bare date means _completed_.
+- **`format` is stamped when the app _creates_ a day file, never when it edits
+  one.** The absence of `_(added …)_` is a positive claim ("started here") in a
+  v2 file and means nothing in a v1 one, and that difference is invisible without
+  the version. Upgrading a legacy file in place would manufacture provenance for
+  tasks that predate the field — so `createDay` sets `DAY_FORMAT_VERSION` and
+  `parseDay`/`serializeDay` preserve whatever was already there, including a
+  version newer than this build understands. Version 1 is the _absence_ of the
+  key; never write `format: 1`. Bump the constant when the meaning of existing
+  syntax changes, not when something is merely added.
 - **Writes are atomic and serialized.** Rust writes to a temp file and renames
   (a day file is the only copy of that day's notes); `main.ts` chains every save
   through `this.writes` so concurrent edits can't interleave.

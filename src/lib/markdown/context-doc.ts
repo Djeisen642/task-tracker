@@ -48,6 +48,7 @@ record of its own is a citation of nothing.
 
 \`\`\`markdown
 ---
+format: 2
 date: 2026-08-02
 work_start: 09:00
 work_end: 17:00
@@ -72,6 +73,19 @@ last_check_in: 14:00
 that day, used so a restart doesn't re-prompt. It is not a claim about when work
 happened — read the notes for that.
 
+\`format\` tells you which revision of this layout the file uses, and it changes
+how much you can conclude from it. **Check it before reasoning about task
+dates.**
+
+| \`format\`      | What it means for you                                                                    |
+| ------------- | ---------------------------------------------------------------------------------------- |
+| absent (v1)   | Written before tasks recorded provenance. A task's start date is **unknown** — see below. |
+| \`2\`           | Tasks record when they first appeared. Start dates are exact.                            |
+| anything else | Written by a newer version than this guide describes. Read it conservatively.             |
+
+A vault usually contains both: files up to some date are v1, everything after
+is v2. That boundary is when the user upgraded, not anything about their work.
+
 ### Task status markers
 
 | Marker  | Meaning                                        |
@@ -86,9 +100,10 @@ was completed, look for the day whose file marks it \`[x]\`.
 
 ### Task dates — how long something took
 
-A task carries \`_(added YYYY-MM-DD)_\` when it first appeared **before** the file
-it is sitting in. A task with no such suffix was added on the file's own date.
-So, for any task line, without opening another file:
+**In a \`format: 2\` file**, a task carries \`_(added YYYY-MM-DD)_\` when it first
+appeared **before** the file it is sitting in. A task with no such suffix was
+added on the file's own date. So, for any task line, without opening another
+file:
 
 - **When it started** — the \`_(added …)_\` date, or this file's date if absent.
 - **When it finished** — this file's date, if the task is marked \`[x]\`.
@@ -97,15 +112,20 @@ So, for any task line, without opening another file:
   \`_(added 2026-07-29)_\` in the file for 2026-08-05 was open across five
   working days.
 
-Two cautions. Elapsed days are *calendar* days between first sighting and
-completion, not effort — a task added Friday and finished Monday spans three
-days of which two were the weekend, and one open across a fortnight may have
-been untouched for most of it. Say "open for N days", not "took N days of
-work". And an \`added\` date is a *floor*: it is the earliest day the app can
-prove the task existed. Files predating this convention, and tasks introduced by
-a hand edit, are stamped with the day they were first carried forward, which may
-be later than the day the work truly began. Treat a long span as reliable and a
-short one as a lower bound.
+**In a v1 file** (no \`format\` key) none of that holds. Those files record only
+that a task was present, so an unannotated task there means "start date
+unknown", *not* "started that day". Don't compute a duration from a v1 file, and
+don't report a task as having started on the day it first shows up in one — say
+the start date isn't recorded. The same applies to the first v2 file after the
+boundary: a task carried into it out of the v1 era is stamped with the earliest
+day it can be *proven* to have existed, which may be later than when the work
+actually began. A long span is reliable; a short one spanning the boundary is a
+lower bound.
+
+Elapsed days are also *calendar* days between first sighting and completion, not
+effort — a task added Friday and finished Monday spans three days of which two
+were the weekend, and one open across a fortnight may have been untouched for
+most of it. Say "open for N days", not "took N days of work".
 
 ### Notes
 

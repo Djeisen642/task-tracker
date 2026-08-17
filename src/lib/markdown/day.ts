@@ -12,6 +12,7 @@
  *
  * ```markdown
  * ---
+ * format: 2
  * date: 2026-08-02
  * work_start: 09:00
  * work_end: 17:00
@@ -38,6 +39,24 @@
  * the team file uses for *completion*, because the two files sit in one folder
  * and an unlabelled date that means opposite things in each is a trap for
  * whoever reads the vault next.
+ *
+ * ## `format`
+ *
+ * The absence of a suffix means two different things depending on who wrote the
+ * file, and that difference is not otherwise visible:
+ *
+ * - In a file this format wrote, the task provably first appeared that day.
+ * - In a file written before the suffix existed, we simply don't know — it may
+ *   have been carried for weeks.
+ *
+ * `format` resolves it. A file the app *creates* is stamped with the current
+ * version, and one it merely *edits* keeps whatever version it already had, so
+ * the app never retroactively vouches for dates it can't actually prove. A
+ * legacy file has no `format` key and is version 1.
+ *
+ * A version this build doesn't recognize is preserved rather than overwritten —
+ * the same rule as unowned keys and sections. Downgrading must not strip a
+ * newer format's marker and leave the file claiming to be something it isn't.
  */
 
 import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
@@ -53,7 +72,27 @@ export interface Note {
   text: string;
 }
 
+/**
+ * The version stamped on day files this build creates.
+ *
+ * Bump this when the meaning of existing syntax changes, not merely when
+ * something is added — a reader that ignores an unknown addition still reads
+ * the file correctly, but one that misreads a changed meaning does so silently.
+ *
+ * - **1** — implicit; no `format` key. Tasks carry no provenance, so an
+ *   undated task's start date is unknown, floored at the file's own date.
+ * - **2** — tasks carry `_(added …)_` when they outlive the day they appeared,
+ *   so an *un*annotated task is a positive claim: it started here.
+ */
+export const DAY_FORMAT_VERSION = 2;
+
 export interface DayDocument {
+  /**
+   * Which revision of this format the file is written in. See
+   * `DAY_FORMAT_VERSION`. Preserved on read so editing a file never upgrades
+   * the claims it makes about data written by an older build.
+   */
+  formatVersion: number;
   date: DateKey;
   workStart: Clock;
   workEnd: Clock;
@@ -101,7 +140,20 @@ const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 
 /** Owned frontmatter keys, in the order they're written. */
-const OWNED_FIELDS = ['date', 'work_start', 'work_end', 'last_check_in'];
+const OWNED_FIELDS = ['format', 'date', 'work_start', 'work_end', 'last_check_in'];
+
+/**
+ * Read the `format` key, defaulting to 1 for a file that has none.
+ *
+ * Anything unparseable is also 1: a corrupt version has to mean "assume the
+ * weakest guarantees", never "assume the strongest".
+ */
+function parseFormatVersion(raw: string | undefined): number {
+  if (raw === undefined) return 1;
+
+  const version = Number(raw);
+  return Number.isInteger(version) && version >= 1 ? version : 1;
+}
 
 /**
  * `date` is the file's own date, and is the default `added` for any task
@@ -197,6 +249,7 @@ export function parseDay(
     lastCheckIn !== undefined && parseClock(lastCheckIn) !== null ? lastCheckIn : undefined;
 
   return {
+    formatVersion: parseFormatVersion(fields.format),
     date,
     workStart: fields.work_start ?? fallback.workStart,
     workEnd: fields.work_end ?? fallback.workEnd,
@@ -211,6 +264,9 @@ export function parseDay(
 /** Render a day document back to Markdown. Round-trips with `parseDay`. */
 export function serializeDay(day: DayDocument): string {
   const fields: Record<string, string> = {
+    // Version 1 is the unversioned legacy format — writing `format: 1` would
+    // invent a key the format it describes never had.
+    ...(day.formatVersion <= 1 ? {} : { format: String(day.formatVersion) }),
     date: day.date,
     work_start: day.workStart,
     work_end: day.workEnd,
@@ -255,6 +311,8 @@ export function createDay(
   tasks: readonly Task[] = [],
 ): DayDocument {
   return {
+    // The app is creating this file, so it can vouch for everything in it.
+    formatVersion: DAY_FORMAT_VERSION,
     date,
     workStart,
     workEnd,

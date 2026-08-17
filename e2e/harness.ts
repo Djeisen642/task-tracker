@@ -140,10 +140,14 @@ export async function advanceMinutes(page: Page, minutes: number): Promise<void>
 export function dayFile(
   date: string,
   tasks: readonly { title: string; marker: ' ' | '/' | 'x'; added?: string }[],
-  extra: { lastCheckIn?: string } = {},
+  extra: { lastCheckIn?: string; formatVersion?: number } = {},
 ): string {
+  const version = extra.formatVersion ?? 2;
   const frontmatter = [
     '---',
+    // Version 1 is the legacy format, which had no such key. Pass it to seed a
+    // file as an older build would have written it.
+    ...(version <= 1 ? [] : [`format: ${String(version)}`]),
     `date: ${date}`,
     'work_start: 09:00',
     'work_end: 17:00',
