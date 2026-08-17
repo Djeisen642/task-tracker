@@ -61,6 +61,7 @@ import {
   addTask,
   completedBeforeCheckIn,
   cycleStatus,
+  isCarriedOver,
   removeTask,
   setTaskStatus,
   summarizeTasks,
@@ -1281,7 +1282,7 @@ class CheckInController {
 
   private renderTask(task: Task): HTMLLIElement {
     return renderTaskRow(task, {
-      carried: task.carriedOver === true,
+      carried: this.day !== null && isCarriedOver(task, this.day.date),
       onToggle: () => {
         this.updateTasks(setTaskStatus(this.tasks(), task.title, cycleStatus(task.status)));
       },
@@ -1308,7 +1309,7 @@ class CheckInController {
     if (title.trim() === '') return;
 
     this.elements.taskInput.value = '';
-    this.updateTasks(addTask(this.tasks(), title));
+    this.updateTasks(addTask(this.tasks(), title, 'upcoming', this.day?.date));
   }
 
   private onAddNote(): void {

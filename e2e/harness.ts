@@ -131,14 +131,23 @@ export async function advanceMinutes(page: Page, minutes: number): Promise<void>
   await page.clock.runFor(minutes * 60_000);
 }
 
-/** A minimal day file, written the way the app writes them. */
+/**
+ * A minimal day file, written the way the app writes them.
+ *
+ * `added` puts the `_(added …)_` suffix on a task, which is how a file records
+ * that the task predates it. Omit it for work that started on `date`.
+ */
 export function dayFile(
   date: string,
-  tasks: readonly { title: string; marker: ' ' | '/' | 'x' }[],
-  extra: { lastCheckIn?: string } = {},
+  tasks: readonly { title: string; marker: ' ' | '/' | 'x'; added?: string }[],
+  extra: { lastCheckIn?: string; formatVersion?: number } = {},
 ): string {
+  const version = extra.formatVersion ?? 2;
   const frontmatter = [
     '---',
+    // Version 1 is the legacy format, which had no such key. Pass it to seed a
+    // file as an older build would have written it.
+    ...(version <= 1 ? [] : [`format: ${String(version)}`]),
     `date: ${date}`,
     'work_start: 09:00',
     'work_end: 17:00',
@@ -148,7 +157,10 @@ export function dayFile(
 
   const taskLines =
     tasks.length > 0
-      ? tasks.map((task) => `- [${task.marker}] ${task.title}`)
+      ? tasks.map(
+          (task) =>
+            `- [${task.marker}] ${task.title}${task.added === undefined ? '' : ` _(added ${task.added})_`}`,
+        )
       : ['_No tasks yet._'];
 
   return [
