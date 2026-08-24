@@ -323,7 +323,7 @@ function renderTaskRow(
 
   const priority = options.priority;
   if (priority === undefined) {
-    item.append(toggle, title, remove);
+    item.append(toggle, title, controls(remove));
     return item;
   }
 
@@ -331,7 +331,7 @@ function renderTaskRow(
   const star = renderPriorityButton(task, priority);
 
   if (rank === undefined) {
-    item.append(toggle, title, star, remove);
+    item.append(toggle, title, controls(star, remove));
     return item;
   }
 
@@ -339,7 +339,7 @@ function renderTaskRow(
   // two keep the same position on every row whether or not it is ranked.
   const up = renderMoveButton(task, 'up', rank > 1, priority.onMove);
   const down = renderMoveButton(task, 'down', rank < priority.ranked, priority.onMove);
-  item.append(toggle, renderRankBadge(rank), title, up, down, star, remove);
+  item.append(toggle, renderRankBadge(rank), title, controls(up, down, star, remove));
 
   // Alt+↑/↓ moves the row without reaching for its buttons — the app is
   // keyboard-first everywhere else (type a task and press Enter, Esc snoozes),
@@ -377,14 +377,48 @@ function renderMoveButton(
   button.type = 'button';
   button.className = 'task-move';
   button.textContent = direction === 'up' ? '▲' : '▼';
-  button.disabled = !enabled;
   button.dataset.control = `move-${direction}`;
   button.title = `Move ${direction} (Alt+${direction === 'up' ? '↑' : '↓'})`;
   button.setAttribute('aria-label', `${task.title} — move ${direction} the priority list`);
+  setInert(button, !enabled);
+
   button.addEventListener('click', () => {
+    // `aria-disabled` still delivers the click, deliberately — see `setInert`.
+    if (button.getAttribute('aria-disabled') === 'true') return;
     onMove(direction);
   });
   return button;
+}
+
+/**
+ * Mark a control unavailable *without* the `disabled` attribute.
+ *
+ * A `disabled` button can't hold focus, and the browser drops it the moment the
+ * attribute lands. That is exactly wrong for the reorder arrows: press ▲ until
+ * the task reaches the top and its own ▲ turns off mid-gesture, so focus
+ * escapes — and handing it to the row's other arrow, as this used to, means the
+ * next press sends the task straight back down. `aria-disabled` keeps focus
+ * where the user put it, announces the state to a screen reader, and leaves the
+ * press a no-op. Every caller must therefore guard its own click handler.
+ */
+function setInert(button: HTMLButtonElement, off: boolean): void {
+  button.setAttribute('aria-disabled', off ? 'true' : 'false');
+  button.classList.toggle('is-off', off);
+}
+
+/**
+ * The row's trailing controls, in one tightly-packed group.
+ *
+ * They share a wrapper rather than sitting in the row's own 9px flex gap
+ * because every one of them costs the *title* its width, on every row, ranked
+ * or not — and the check-in card is 420px wide, where 10px is the difference
+ * between a task fitting on one line and wrapping onto two.
+ */
+function controls(...buttons: readonly HTMLElement[]): HTMLSpanElement {
+  const group = document.createElement('span');
+  group.className = 'task-controls';
+  group.append(...buttons);
+  return group;
 }
 
 /**
@@ -435,14 +469,26 @@ function renderPriorityButton(
     button.textContent = '☆';
     // Nothing to promote finished work to: the rank would be stripped by the
     // next normalize, so the control says so rather than appearing to work.
-    button.disabled = task.status === 'completed' || options.full;
-    button.title = options.full
-      ? `Top ${String(MAX_PRIORITIES)} is full — unrank something first`
-      : `Add to today's top ${String(MAX_PRIORITIES)}`;
-    button.setAttribute('aria-label', `${task.title} — add to today's priorities`);
+    const finished = task.status === 'completed';
+    setInert(button, finished || options.full);
+
+    // The reason goes in the `aria-label`, not just the tooltip: `aria-label`
+    // overrides `title` for a screen reader, so a reason left only in the
+    // tooltip is a reason only sighted users get.
+    const unavailable = finished
+      ? 'finished work is not ranked'
+      : `top ${String(MAX_PRIORITIES)} is full, unrank something first`;
+    const available = `add to today's top ${String(MAX_PRIORITIES)}`;
+    const explanation = finished || options.full ? unavailable : available;
+
+    button.title = `${explanation.charAt(0).toUpperCase()}${explanation.slice(1)}`;
+    button.setAttribute('aria-label', `${task.title} — ${explanation}`);
   }
 
-  button.addEventListener('click', options.onToggle);
+  button.addEventListener('click', () => {
+    if (button.getAttribute('aria-disabled') === 'true') return;
+    options.onToggle();
+  });
   return button;
 }
 
@@ -452,8 +498,20 @@ interface RowFocus {
   control: string;
 }
 
-/** The focused row control, or `null` when focus is anywhere else. */
-function captureRowFocus(list: HTMLElement): RowFocus | null {
+/**
+ * The focused row control, or `null` when focus is anywhere else.
+ *
+ * `keyboardDriven` is the whole safety condition. A control focused by a *mouse*
+ * click draws no focus ring and, on this card, isn't even visible once the
+ * pointer leaves the row — so handing that focus back across a re-render arms an
+ * invisible button, and the next Space or Enter the user presses re-fires it.
+ * That is a status silently cycling in the only copy of the day's notes. Focus
+ * is therefore restored only for someone who is actually driving from the
+ * keyboard, which is also the only person it helps.
+ */
+function captureRowFocus(list: HTMLElement, keyboardDriven: boolean): RowFocus | null {
+  if (!keyboardDriven) return null;
+
   const active = document.activeElement;
   if (!(active instanceof HTMLElement) || !list.contains(active)) return null;
 
@@ -480,16 +538,11 @@ function restoreRowFocus(list: HTMLElement, focus: RowFocus | null): void {
   for (const row of list.querySelectorAll<HTMLElement>('.task')) {
     if (row.dataset.taskTitle !== focus.title) continue;
 
-    const control = row.querySelector<HTMLElement>(`[data-control="${focus.control}"]`);
-    // A disabled button can't take focus: moving a task to the top disables its
-    // own "up" arrow, so hand focus to the pair's other half rather than
-    // dropping it out of the row entirely.
-    if (control instanceof HTMLButtonElement && control.disabled) {
-      row.querySelector<HTMLElement>('.task-move:not(:disabled)')?.focus();
-      return;
-    }
-
-    control?.focus();
+    // Always the same control, including one that has just become unavailable:
+    // the arrows go inert rather than `disabled` (see `setInert`) precisely so
+    // that a task arriving at the top of the list doesn't throw focus somewhere
+    // that reverses the move on the next press.
+    row.querySelector<HTMLElement>(`[data-control="${focus.control}"]`)?.focus();
     return;
   }
 }
@@ -535,6 +588,15 @@ class CheckInController {
   private expanded = false;
   /** Last text pushed to the tray, so identical updates aren't re-sent. */
   private lastTrayStatus: string | null = null;
+  /**
+   * `true` when the last input the app saw came from the keyboard.
+   *
+   * Read by `captureRowFocus`, which must not hand focus back to a control the
+   * user reached with the mouse — see there. Tracked explicitly rather than
+   * read off `:focus-visible`, whose value mid-interaction depends on browser
+   * heuristics this app can't test on the one platform that matters.
+   */
+  private keyboardDriven = false;
   /**
    * Tasks already marked done when this check-in opened. They stay in the day
    * file but are hidden until wrap-up; only work finished during this prompt
@@ -593,6 +655,23 @@ class CheckInController {
 
     this.bindSettingsEvents();
     this.bindTeamEvents();
+
+    // Which input device is in charge, for focus restoration across a re-render.
+    // Capture phase, so a handler that stops propagation can't desynchronize it.
+    document.addEventListener(
+      'keydown',
+      () => {
+        this.keyboardDriven = true;
+      },
+      true,
+    );
+    document.addEventListener(
+      'pointerdown',
+      () => {
+        this.keyboardDriven = false;
+      },
+      true,
+    );
 
     // Esc snoozes; the card is a prompt, not a modal you have to defeat.
     document.addEventListener('keydown', (event) => {
@@ -1433,7 +1512,7 @@ class CheckInController {
     // it is not for the reorder arrows, where the second press has nothing to
     // land on and a keyboard user is dumped back to the top of the card after
     // moving a task one place.
-    const focus = captureRowFocus(this.elements.taskList);
+    const focus = captureRowFocus(this.elements.taskList, this.keyboardDriven);
     this.elements.taskList.replaceChildren(...visible.map((task) => this.renderTask(task)));
     restoreRowFocus(this.elements.taskList, focus);
 

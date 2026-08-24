@@ -63,6 +63,16 @@ test('capture: a ranked day', async ({ page }) => {
   await expect(page.locator('.task.is-priority')).toHaveCount(3);
 
   await settle(page);
+
+  // Hover a ranked row before capturing: the star and the ▲▼ pair only appear
+  // on hover or focus, so a resting shot shows the numbers and none of the
+  // controls the README is describing beside it.
+  await page.locator('.task', { hasText: 'Draft the migration RFC' }).hover();
+  const hovered = page.locator('.task', { hasText: 'Draft the migration RFC' });
+  await expect(hovered.locator('.task-priority')).toHaveCSS('opacity', '1');
+  await expect(hovered.locator('.task-move')).toHaveCount(2);
+  await page.waitForTimeout(300);
+
   await page.screenshot({ path: `${SHOTS}/priorities.png` });
 });
 

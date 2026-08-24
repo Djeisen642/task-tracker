@@ -83,12 +83,15 @@ src/
     tasks.ts(.test)      # Task model, status cycle, carry-over
     schedule.ts(.test)   # Slot-based check-in scheduler (the heart of the app)
     settings.ts(.test)   # Settings model, defensive parsing, panel draft + validation
+    tray.ts(.test)       # The tray's status line
     vault.ts(.test)      # VaultPort seam, day load/save, MemoryVault fake
     errors.ts(.test)     # describeError() for native dialogs
     tauri.ts             # Optional native bridge; degrades gracefully in a browser
     markdown/
       frontmatter.ts(.test)  # Tiny scalar-only YAML frontmatter reader/writer
+      sections.ts(.test)     # Heading-level split, so unowned sections survive
       day.ts(.test)          # The day file: parse/serialize, preserves hand edits
+      team.ts(.test)         # team.<person>.md: one running file per report
       mentions.ts(.test)     # @person / #tag extraction
       rollup.ts(.test)       # Standup summary + weekly rollup
       context-doc.ts         # CONTEXT.md — the schema guide for agents
@@ -101,8 +104,10 @@ src-tauri/
 e2e/
   harness.ts            # startApp(): frozen clock + seeded localStorage vault
   checkin.spec.ts       # The check-in loop, driven in a real browser
-  priorities.spec.ts    # Ranking the day's top five: star, renumber, carry over
+  priorities.spec.ts    # The top five: star, reorder, renumber, carry over
   settings.spec.ts      # The settings panel: validation, persistence, live effect
+  team.spec.ts          # The Team panel and the day-end manager step
+  expand.spec.ts        # The card's expand toggle
   capture.spec.ts       # Screenshots into docs/screenshots/
 scripts/
   backfill-provenance.ts(.test)  # One-shot: reconstruct task `added` dates in a
@@ -163,30 +168,57 @@ docs/
   `normalizePriorities` in `tasks.ts` is the whole feature: it renumbers to
   `1…n`, strips the rank from anything completed, and drops anything past
   `MAX_PRIORITIES`. Every mutator (`setTaskStatus`, `removeTask`,
-  `togglePriority`, `carryOverTasks`) calls it, so the invariant belongs to the
-  model rather than to whichever caller remembered — and finishing your number
-  two promotes number three instead of leaving the list reading `1, 3, 4`. Two
+  `togglePriority`, `carryOverTasks`) calls it, and `openDay` runs it once as
+  the app takes ownership of today's file, so no caller has to remember —
+  finishing your number two promotes number three instead of leaving the list
+  reading `1, 3, 4`. The deliberate exceptions are `addTask` (adds nothing
+  ranked) and `parseDay`, which repairs nothing because reading a file is not
+  the moment to rewrite it. `priorityTasks` is open-only for the same reason:
+  five ranks a hand edit left on finished work must not report the top five as
+  full when the card has nothing ranked to show. Two
   things follow that are easy to "fix" and shouldn't be: a day where nothing was
   ranked writes no `_(priority …)_` anywhere (that is what makes the feature
   optional rather than another field to fill in), and a full list refuses a
   sixth rather than evicting number five, because five was a decision.
 - **Reordering is two buttons and a keyboard shortcut, not drag-and-drop.** The
   ranked list is at most five rows in a 420px window, and a drag would still
-  need a keyboard equivalent to be usable at all — so ▲▼ (plus Alt+↑/↓ on the
-  focused row) is the whole feature rather than half of it. It only works
-  because `render()` hands focus back to the same control after rebuilding the
-  list (`captureRowFocus`/`restoreRowFocus`): without that, the second press has
-  nothing to land on and a keyboard user is thrown back to the top of the card
-  after moving a task one place. Rows are matched by comparing `dataset` values,
-  never by building a selector out of a task title — vault content is untrusted,
-  and a title with a quote in it would break the query.
+  need a keyboard equivalent to be usable at all — so ▲▼ (plus Alt+↑/↓ from any
+  control on the row; the `li` itself is not focusable) is the whole feature
+  rather than half of it. Three things it rests on, each of which was a bug
+  first:
+  - **`render()` hands focus back to the same control** after rebuilding the
+    list (`captureRowFocus`/`restoreRowFocus`), so the second press has
+    something to land on. Rows are matched by comparing `dataset` values, never
+    by building a selector out of a task title — vault content is untrusted.
+  - **Only when the keyboard is driving** (`keyboardDriven`). Restoring focus
+    after a _mouse_ click arms a control that draws no ring and is invisible
+    once the pointer leaves the row, so the next Space or Enter re-fires it —
+    a task's status silently cycling in the only copy of that day's notes.
+  - **Unavailable controls are `aria-disabled`, not `disabled`** (`setInert`).
+    A `disabled` button drops focus the instant the attribute lands, which
+    happens mid-gesture as a task reaches the top; focus then fell to the row's
+    _other_ arrow and the next press sent it back down. Every handler on such a
+    control must check the attribute itself, because the click still arrives.
+- **The mouse and the keyboard differ here, and the docs must say so.** Focus
+  follows the row, a pointer does not: click ▲ and the displaced task lands
+  under the cursor, so a second click in the same spot undoes the first. Alt+↑
+  repeats cleanly; the mouse needs re-aiming. Don't write "click it three times
+  to reach the top" again.
+- **The row's controls are under WCAG 2.5.8's 24×24px target size, knowingly.**
+  Four of them (▲▼★×) at 24px would be 96px of a 420px row, taken from the task
+  title. They are 17–18px wide and 21px tall, at `--ink-dim` rather than the
+  faint grey the × used, which is the most that fits. If the card ever gets
+  wider, this is the first thing to spend it on.
 - **The rank renders inline; nothing is reserved for it.** The first cut gave
   every row a leading star column, hidden until hover — which indented every
   task on the card by 24px on days nobody ranked, i.e. most of them. The number
   is now a `.task-rank` span present only on ranked rows, and the star that sets
-  it sits with the remove button and appears on hover. Compare
-  `docs/screenshots/day-start.png` (unranked, pixel-identical to before ranking
-  existed) with `priorities.png` before changing this.
+  it sits with the remove button inside `.task-controls`, revealed on hover or
+  focus. What an unranked day does still pay is the star's own width: a task
+  title is ~293px against ~312px before the feature (measured at the real
+  420×470 window), which is why the trailing controls share one tight flex box
+  instead of each sitting in the row's 9px gap. Measure it before adding a
+  fourth control, and look at `day-start.png` — its rows are the unranked case.
 - **The Markdown is the source of truth.** Not a cache, not an export. If a
   SQLite index is ever added it must be _derived_ and rebuildable — never written
   before the Markdown. See `docs/future-work.md`.

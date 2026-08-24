@@ -47,6 +47,14 @@
  * `normalizePriorities`, which is what closes the gap when a ranked task is
  * finished.
  *
+ * Both annotations are claims on a *shape* of trailing text, which a title can
+ * collide with: a task literally called "Bump the ticket to _(priority 3)_"
+ * parses as a rank and loses those words the moment the rank is dropped. The
+ * cost is accepted here as it already was for `_(added …)_` — the alternative
+ * is an escaping scheme in a file whose whole point is that a human can read
+ * and edit it — but note the asymmetry: an unwanted `_(added …)_` survives
+ * every app write, while a rank is released by an ordinary click on the star.
+ *
  * ## `format`
  *
  * The absence of a suffix means two different things depending on who wrote the
@@ -143,8 +151,15 @@ const STATUS_TO_MARKER: Record<TaskStatus, string> = {
 const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
 /** A trailing `_(added 2026-07-30)_` — see the module doc. */
 const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
-/** A trailing `_(priority 2)_` — the user's top five for the day. */
-const PRIORITY_PATTERN = /\s*_\(priority (\d+)\)_\s*$/;
+/**
+ * A trailing `_(priority 2)_` — the user's top five for the day.
+ *
+ * Two digits at most. An unbounded `\d+` accepts a number that `String()`
+ * renders in exponent form on the way back out (`1e+21`), which this pattern
+ * then can't match — the annotation would be swallowed into the title and the
+ * round-trip identity would break. Nothing that long was a rank anyway.
+ */
+const PRIORITY_PATTERN = /\s*_\(priority (\d{1,2})\)_\s*$/;
 /** `- 10:15 — text`, accepting an em dash, en dash or hyphen as the separator. */
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 

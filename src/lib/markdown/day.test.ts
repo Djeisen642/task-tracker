@@ -447,6 +447,36 @@ _No notes yet._
     expect(task?.priority).toBeUndefined();
   });
 
+  it('refuses an implausibly long rank rather than mangling it on the way out', () => {
+    // `\d+` would accept this, and `String(1e21)` writes it back as `1e+21`,
+    // which no longer parses — the annotation would be swallowed into the title.
+    const source = RANKED.replace('_(priority 1)_', '_(priority 1000)_');
+    const task = parseDay(source, FALLBACK).tasks[0];
+
+    expect(task?.priority).toBeUndefined();
+    expect(task?.title).toBe('Ship the rollback path _(priority 1000)_');
+    expect(serializeDay(parseDay(source, FALLBACK))).toBe(source);
+  });
+
+  it('round-trips a two-digit hand-written rank unchanged', () => {
+    const source = RANKED.replace('_(priority 2)_', '_(priority 42)_');
+
+    expect(parseDay(source, FALLBACK).tasks[1]?.priority).toBe(42);
+    expect(serializeDay(parseDay(source, FALLBACK))).toBe(source);
+  });
+
+  it('serializes what the document holds, including a rank on completed work', () => {
+    // Faithfulness, not endorsement: only a hand edit can produce this, and
+    // `openDay` normalizes it away before the app can write the file back.
+    const day = createDay('2026-08-02', '09:00', '17:00', [
+      { title: 'Review the checklist', status: 'completed', priority: 1 },
+    ]);
+
+    const written = serializeDay(day);
+    expect(written).toContain('- [x] Review the checklist _(priority 1)_');
+    expect(parseDay(written, FALLBACK)).toEqual(day);
+  });
+
   it('preserves a rank a hand edit put out of order, for the model to tidy', () => {
     const source = RANKED.replace('_(priority 2)_', '_(priority 9)_');
 

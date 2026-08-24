@@ -280,8 +280,17 @@ describe('togglePriority', () => {
   });
 
   it('leaves a day where nothing was ranked completely unannotated', () => {
-    expect(TASKS.every((task) => task.priority === undefined)).toBe(true);
-    expect(togglePriority(TASKS, 'Nothing by this name')).toEqual(TASKS);
+    const untouched = togglePriority(TASKS, 'Nothing by this name');
+
+    expect(untouched).toEqual(TASKS);
+    expect(untouched.every((task) => !('priority' in task))).toBe(true);
+  });
+
+  it('does not mutate the array it was given', () => {
+    const before = structuredClone(TASKS);
+    togglePriority(TASKS, 'Draft the RFC');
+
+    expect(TASKS).toEqual(before);
   });
 
   it('refuses a sixth priority rather than evicting the fifth', () => {
@@ -304,7 +313,30 @@ describe('togglePriority', () => {
   });
 
   it('will not rank completed work', () => {
-    expect(togglePriority(TASKS, 'Review the checklist')).toEqual(TASKS);
+    const untouched = togglePriority(TASKS, 'Review the checklist');
+
+    expect(untouched).toEqual(TASKS);
+    // `toEqual` ignores an explicitly-undefined key, so assert the key's absence
+    // directly: a `priority: undefined` would be serialized as a real rank.
+    expect(untouched.every((task) => !('priority' in task))).toBe(true);
+  });
+
+  it('ignores ranks a hand edit left on completed work when the list looks full', () => {
+    // Five finished tasks carrying ranks used to report the top five as full,
+    // and the card hides completed work — so the star was disabled for the rest
+    // of the day with nothing on screen to unrank.
+    const handEdited: Task[] = [
+      ...Array.from({ length: MAX_PRIORITIES }, (_unused, index) => ({
+        title: `Finished ${String(index)}`,
+        status: 'completed' as const,
+        priority: index + 1,
+      })),
+      { title: 'New work', status: 'upcoming' as const },
+    ];
+
+    expect(prioritiesFull(handEdited)).toBe(false);
+    expect(priorityTasks(handEdited)).toEqual([]);
+    expect(ranks(togglePriority(handEdited, 'New work')).at(-1)).toEqual(['New work', 1]);
   });
 });
 
@@ -402,6 +434,19 @@ describe('tasksForCheckIn with priorities', () => {
 });
 
 describe('carryOverTasks with priorities', () => {
+  it('carries nothing ranked when yesterday only ranked what it finished', () => {
+    const yesterday: Task[] = [
+      { title: 'Ship the rollback', status: 'completed', priority: 1, added: '2026-08-03' },
+      { title: 'Answer the survey', status: 'upcoming', added: '2026-08-03' },
+    ];
+
+    const carried = carryOverTasks(yesterday, '2026-08-03');
+    expect(carried).toEqual([
+      { title: 'Answer the survey', status: 'upcoming', added: '2026-08-03' },
+    ]);
+    expect(carried.every((task) => !('priority' in task))).toBe(true);
+  });
+
   it('carries the ranking forward, compacted around what got done', () => {
     const yesterday: Task[] = [
       { title: 'Ship the rollback', status: 'completed', priority: 1, added: '2026-08-03' },
@@ -473,6 +518,32 @@ describe('movePriority', () => {
 
     expect(moved[0]).toEqual({ title: 'Ship the rollback', status: 'in-progress', priority: 1 });
     expect(moved[3]).toEqual({ title: 'Answer the survey', status: 'upcoming' });
+  });
+
+  it('swaps by position, so two titles that compare equal keep distinct ranks', () => {
+    // `sameTask` ignores case, so a hand-edited file can hold two tasks one
+    // title matches. Re-mapping by title gave both the same new rank and lost
+    // the other one — and unlike the other mutators this result is written
+    // straight to the file.
+    const collision: Task[] = [
+      { title: 'Review PR', status: 'upcoming', priority: 1 },
+      { title: 'review pr', status: 'upcoming', priority: 2 },
+      { title: 'Other', status: 'upcoming', priority: 3 },
+    ];
+
+    expect(ranks(movePriority(collision, 'Review PR', 'down'))).toEqual([
+      ['Review PR', 2],
+      ['review pr', 1],
+      ['Other', 3],
+    ]);
+  });
+
+  it('does not mutate the array it was given', () => {
+    const tasks = ranked();
+    const before = structuredClone(tasks);
+    movePriority(tasks, 'Draft the RFC', 'up');
+
+    expect(tasks).toEqual(before);
   });
 
   it('moves one place through the sparse ranks a hand edit can leave', () => {

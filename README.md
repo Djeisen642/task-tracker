@@ -30,7 +30,7 @@ work_end: 17:00
 ## Tasks
 
 - [/] Ship the rollback path _(priority 1)_ _(added 2026-07-30)_
-- [ ] Draft the migration RFC _(priority 2)_
+- [ ] Draft the migration RFC
 - [x] Review the release checklist
 
 ## Notes
@@ -50,23 +50,26 @@ resurrect a stale list). Completed tasks stay in the day that finished them.
 
 ### Your top five
 
-Any task can be starred into today's top five. Ranked tasks lead the card as a
-numbered list and carry `_(priority N)_` in the file. Finish your number one and
-the rest move up — the open list always reads `1, 2, 3`, never `1, 3, 5` — and
-whatever is still ranked at the end of the day carries into tomorrow in the same
-order.
+Hover a task (or tab to it) and a **☆** appears at the end of the row: that
+puts it in today's top five. Ranked tasks lead the card as a numbered list and
+carry `_(priority N)_` in the file. Finish your number one and the rest move
+up — the open list always reads `1, 2, 3`, never `1, 3, 5` — and whatever is
+still ranked at the end of the day carries into tomorrow in the same order.
 
-Reprioritizing is the ▲▼ pair on a ranked row, or **Alt+↑ / Alt+↓** with the row
-focused. The button keeps focus as the row moves, so pressing it three times
-walks something to the top — which is the case this is for: at 11:00 the thing
-that matters changed.
+Reprioritizing is the **▲▼** pair on a ranked row, or **Alt+↑ / Alt+↓** while
+any control on that row has focus. The keyboard is the better of the two here:
+focus follows the row as it moves, so holding the key walks a task to the top
+in three presses. With the mouse each click moves the row out from under the
+pointer, so aim at the arrow on the row where the task now is.
 
-It is entirely optional, in the literal sense: rank nothing and no day file ever
-mentions a priority, and the card looks exactly as it does above. That is also
-why a completed task keeps no rank — the number is a claim about what to do
-next, so it leaves with the work rather than sitting on a finished line.
+![Today's top five, with one row hovered](docs/screenshots/priorities.png)
 
-![Today's top five](docs/screenshots/priorities.png)
+It is optional in the literal sense: rank nothing and no day file ever mentions
+a priority, and the card is the plain list in the day-start shot below. (The one
+trace ranking leaves on an unranked day is the star's own width — every row's
+title is about 6% narrower than it was before the feature existed.) That is also
+why a completed task keeps no rank: the number is a claim about what to do next,
+so it leaves with the work rather than sitting on a finished line.
 
 A task that outlives the day it appeared picks up `_(added YYYY-MM-DD)_`. That
 one suffix does two jobs: its presence marks the task as carried over, and it
@@ -256,7 +259,7 @@ runs format, lint, typecheck and tests; `pnpm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (485 unit tests plus 90 end-to-end
+Pre-v0.1. The web layer is built and tested (500 unit tests plus 99 end-to-end
 tests driving the real card in a browser), and the Rust layer compiles clean —
 `cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
 all pass.

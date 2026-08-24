@@ -96,11 +96,29 @@ function withoutPriority(task: Task): Task {
   return rest;
 }
 
+/**
+ * Ranked tasks with their position in the array, in rank order.
+ *
+ * **Open tasks only.** A rank on a completed task is something only a hand edit
+ * can produce, and every function that reads the ranking has to agree to ignore
+ * it — otherwise five finished rows can report the list as full while the card
+ * shows nothing to unrank. `normalizePriorities` strips those ranks on the next
+ * write; until then they are invisible to the model.
+ *
+ * The index travels with the task because titles are not a safe key: `sameTask`
+ * is case- and whitespace-insensitive, so a hand-edited file can hold two tasks
+ * one title matches.
+ */
+function rankedEntries(tasks: readonly Task[]): { task: Task; index: number }[] {
+  return tasks
+    .map((task, index) => ({ task, index }))
+    .filter(({ task }) => task.priority !== undefined && isOpen(task))
+    .sort((a, b) => (a.task.priority ?? 0) - (b.task.priority ?? 0) || a.index - b.index);
+}
+
 /** The ranked tasks, in rank order. Empty when nothing has been ranked. */
 export function priorityTasks(tasks: readonly Task[]): Task[] {
-  return tasks
-    .filter((task) => task.priority !== undefined)
-    .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+  return rankedEntries(tasks).map(({ task }) => task);
 }
 
 /** `true` when all five slots are taken, so nothing else can be promoted. */
@@ -201,9 +219,9 @@ export function movePriority(
   // Normalize first so "one place" is meaningful even if the file arrived with
   // ranks like 2, 5, 9 from a hand edit.
   const normalized = normalizePriorities(tasks);
-  const ranked = priorityTasks(normalized);
+  const ranked = rankedEntries(normalized);
 
-  const from = ranked.findIndex((task) => sameTask(task.title, title));
+  const from = ranked.findIndex(({ task }) => sameTask(task.title, title));
   const to = from + (direction === 'up' ? -1 : 1);
   if (from === -1 || to < 0 || to >= ranked.length) return normalized;
 
@@ -211,9 +229,12 @@ export function movePriority(
   const displaced = ranked[to];
   if (moved === undefined || displaced === undefined) return normalized;
 
-  return normalized.map((task) => {
-    if (sameTask(task.title, moved.title)) return { ...task, priority: displaced.priority };
-    if (sameTask(task.title, displaced.title)) return { ...task, priority: moved.priority };
+  // Swapped by position, not by title: two tasks whose titles `sameTask` treats
+  // as one (a hand-edited "Review PR" and "review pr") would otherwise both take
+  // the same new rank and quietly delete the other one from the ranking.
+  return normalized.map((task, index) => {
+    if (index === moved.index) return { ...task, priority: displaced.task.priority };
+    if (index === displaced.index) return { ...task, priority: moved.task.priority };
     return task;
   });
 }
@@ -234,10 +255,9 @@ export function tasksForCheckIn(
   const upcoming: Task[] = [];
   const doneThisSession: Task[] = [];
 
-  // Open only: a rank on a completed task can survive a hand edit until the
-  // next write normalizes it away, and yesterday's finished work has no
-  // business leading today's card.
-  const ranked = priorityTasks(tasks).filter(isOpen);
+  // `priorityTasks` is open-only, so a rank a hand edit left on completed work
+  // doesn't drag yesterday's finished task to the top of today's card.
+  const ranked = priorityTasks(tasks);
 
   for (const task of tasks) {
     if (ranked.includes(task)) {
