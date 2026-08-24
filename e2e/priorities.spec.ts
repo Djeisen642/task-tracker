@@ -156,3 +156,80 @@ test('a rank survives the next check-in of the day', async ({ page }) => {
   await expect(page.locator('#card')).toHaveClass(/is-open/);
   await expect(page.locator('.task.is-priority .task-rank')).toHaveText(['1']);
 });
+
+test('reorders the top five with the arrows, keeping focus on the button', async ({ page }) => {
+  await startApp(page);
+  await addTasks(page, ['Ship the rollback', 'Draft the RFC', 'Review the checklist']);
+  for (const title of ['Ship the rollback', 'Draft the RFC', 'Review the checklist']) {
+    await page.locator('.task', { hasText: title }).locator('.task-priority').click();
+  }
+
+  const third = page.locator('.task', { hasText: 'Review the checklist' });
+  await third.locator('[data-control="move-up"]').click();
+
+  await expect(page.locator('.task.is-priority .task-title')).toHaveText([
+    'Ship the rollback',
+    'Review the checklist',
+    'Draft the RFC',
+  ]);
+  await expect(page.locator('.task.is-priority .task-rank')).toHaveText(['1', '2', '3']);
+
+  // The button the user just pressed is still under their finger for the next
+  // press — the row moved, so the whole list was rebuilt underneath it.
+  await expect(
+    page.locator('.task', { hasText: 'Review the checklist' }).locator('[data-control="move-up"]'),
+  ).toBeFocused();
+
+  const file = await readVaultFile(page, '2026-08-03.md');
+  expect(file).toContain('- [ ] Ship the rollback _(priority 1)_');
+  expect(file).toContain('- [ ] Review the checklist _(priority 2)_');
+  expect(file).toContain('- [ ] Draft the RFC _(priority 3)_');
+});
+
+test('walks a task to the top with repeated presses', async ({ page }) => {
+  await startApp(page);
+  await addTasks(page, ['One', 'Two', 'Three']);
+  for (const title of ['One', 'Two', 'Three']) {
+    await page.locator('.task', { hasText: title }).locator('.task-priority').click();
+  }
+
+  const up = () =>
+    page.locator('.task', { hasText: 'Three' }).locator('[data-control="move-up"]').click();
+  await up();
+  await up();
+
+  await expect(page.locator('.task.is-priority .task-title')).toHaveText(['Three', 'One', 'Two']);
+
+  // At the top there is nowhere further to go, and focus lands on the arrow
+  // that still works rather than on a disabled button.
+  const row = page.locator('.task', { hasText: 'Three' });
+  await expect(row.locator('[data-control="move-up"]')).toBeDisabled();
+  await expect(row.locator('[data-control="move-down"]')).toBeFocused();
+});
+
+test('moves a task with Alt+arrow from the keyboard', async ({ page }) => {
+  await startApp(page);
+  await addTasks(page, ['Ship the rollback', 'Draft the RFC']);
+  for (const title of ['Ship the rollback', 'Draft the RFC']) {
+    await page.locator('.task', { hasText: title }).locator('.task-priority').click();
+  }
+
+  await page.locator('.task', { hasText: 'Draft the RFC' }).locator('.task-toggle').focus();
+  await page.keyboard.press('Alt+ArrowUp');
+
+  await expect(page.locator('.task.is-priority .task-title')).toHaveText([
+    'Draft the RFC',
+    'Ship the rollback',
+  ]);
+  // Focus followed the row, so a second Alt+↑ would act on the same task.
+  await expect(
+    page.locator('.task', { hasText: 'Draft the RFC' }).locator('.task-toggle'),
+  ).toBeFocused();
+});
+
+test('offers no reorder arrows on an unranked task', async ({ page }) => {
+  await startApp(page);
+  await addTasks(page, ['Ship the rollback']);
+
+  await expect(page.locator('.task-move')).toHaveCount(0);
+});

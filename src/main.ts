@@ -63,12 +63,15 @@ import {
   cycleStatus,
   isCarriedOver,
   MAX_PRIORITIES,
+  movePriority,
   prioritiesFull,
+  priorityTasks,
   removeTask,
   setTaskStatus,
   summarizeTasks,
   tasksForCheckIn,
   togglePriority,
+  type PriorityMove,
   type Task,
 } from './lib/tasks.ts';
 import { formatTrayStatus } from './lib/tray.ts';
@@ -267,14 +270,24 @@ function renderTaskRow(
     onToggle: () => void;
     onRemove: () => void;
     /**
-     * The ranking control, when this list has one. Omitted by the Team panel:
+     * The ranking controls, when this list has them. Omitted by the Team panel:
      * the top five is the user's own day, not a ranking handed to a report.
      */
-    priority?: { full: boolean; onToggle: () => void };
+    priority?: {
+      full: boolean;
+      /** How many tasks are ranked, so the last one knows it can't move down. */
+      ranked: number;
+      onToggle: () => void;
+      onMove: (direction: PriorityMove) => void;
+    };
   },
 ): HTMLLIElement {
   const item = document.createElement('li');
   item.className = 'task';
+  // Identifies the row for focus restoration across a re-render — see
+  // `captureRowFocus`. Titles are unique within a day (`addTask` rejects a
+  // duplicate) and go in as a dataset value, never as a selector or markup.
+  item.dataset.taskTitle = task.title;
   if (task.status === 'in-progress') item.classList.add('is-in-progress');
   if (task.status === 'completed') item.classList.add('is-completed');
   if (options.carried === true) item.classList.add('is-carried');
@@ -292,6 +305,7 @@ function renderTaskRow(
   toggle.textContent = glyphs[task.status];
   toggle.title = `Mark ${cycleStatus(task.status).replace('-', ' ')}`;
   toggle.setAttribute('aria-label', `${task.title} — ${task.status}`);
+  toggle.dataset.control = 'status';
   toggle.addEventListener('click', options.onToggle);
 
   const title = document.createElement('span');
@@ -304,18 +318,73 @@ function renderTaskRow(
   remove.textContent = '×';
   remove.title = 'Remove task';
   remove.setAttribute('aria-label', `Remove ${task.title}`);
+  remove.dataset.control = 'remove';
   remove.addEventListener('click', options.onRemove);
 
-  if (options.priority === undefined) {
+  const priority = options.priority;
+  if (priority === undefined) {
     item.append(toggle, title, remove);
     return item;
   }
 
-  const badge = task.priority === undefined ? null : renderRankBadge(task.priority);
-  const star = renderPriorityButton(task, options.priority);
-  item.append(toggle, ...(badge === null ? [] : [badge]), title, star, remove);
+  const rank = task.priority;
+  const star = renderPriorityButton(task, priority);
+
+  if (rank === undefined) {
+    item.append(toggle, title, star, remove);
+    return item;
+  }
+
+  // The reorder pair sits inboard of the star and the remove button, so those
+  // two keep the same position on every row whether or not it is ranked.
+  const up = renderMoveButton(task, 'up', rank > 1, priority.onMove);
+  const down = renderMoveButton(task, 'down', rank < priority.ranked, priority.onMove);
+  item.append(toggle, renderRankBadge(rank), title, up, down, star, remove);
+
+  // Alt+↑/↓ moves the row without reaching for its buttons — the app is
+  // keyboard-first everywhere else (type a task and press Enter, Esc snoozes),
+  // and reordering is the one action you do several times in a row.
+  item.addEventListener('keydown', (event) => {
+    if (!event.altKey || event.shiftKey || event.ctrlKey || event.metaKey) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+
+    const direction: PriorityMove = event.key === 'ArrowUp' ? 'up' : 'down';
+    if (direction === 'up' ? rank <= 1 : rank >= priority.ranked) return;
+
+    event.preventDefault();
+    priority.onMove(direction);
+  });
 
   return item;
+}
+
+/**
+ * One half of the reorder pair on a ranked row.
+ *
+ * Two buttons rather than drag-and-drop: the list is five items in a 420px
+ * window, dragging would still need a keyboard equivalent to be usable at all,
+ * and a press that keeps its focus (see `restoreRowFocus`) walks a task to the
+ * top in three taps of the same key. The end of the list disables its button
+ * instead of hiding it, so the pair doesn't reflow as a task moves.
+ */
+function renderMoveButton(
+  task: Task,
+  direction: PriorityMove,
+  enabled: boolean,
+  onMove: (direction: PriorityMove) => void,
+): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'task-move';
+  button.textContent = direction === 'up' ? '▲' : '▼';
+  button.disabled = !enabled;
+  button.dataset.control = `move-${direction}`;
+  button.title = `Move ${direction} (Alt+${direction === 'up' ? '↑' : '↓'})`;
+  button.setAttribute('aria-label', `${task.title} — move ${direction} the priority list`);
+  button.addEventListener('click', () => {
+    onMove(direction);
+  });
+  return button;
 }
 
 /**
@@ -354,6 +423,7 @@ function renderPriorityButton(
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'task-priority';
+  button.dataset.control = 'priority';
 
   const rank = task.priority;
   if (rank !== undefined) {
@@ -374,6 +444,54 @@ function renderPriorityButton(
 
   button.addEventListener('click', options.onToggle);
   return button;
+}
+
+/** Which control of which row had focus, so a re-render can hand it back. */
+interface RowFocus {
+  title: string;
+  control: string;
+}
+
+/** The focused row control, or `null` when focus is anywhere else. */
+function captureRowFocus(list: HTMLElement): RowFocus | null {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement) || !list.contains(active)) return null;
+
+  const title = active.closest<HTMLElement>('.task')?.dataset.taskTitle;
+  const control = active.dataset.control;
+  if (title === undefined || control === undefined) return null;
+
+  return { title, control };
+}
+
+/**
+ * Put focus back on the same control of the same row after a re-render.
+ *
+ * Rows are matched by walking them and comparing `dataset` values rather than
+ * by building an attribute selector: task titles come out of a file other tools
+ * write, and a title containing a quote would otherwise be a selector injection
+ * (a broken query at best). The control names are ours, so those are safe to
+ * query with. A row that no longer exists — just removed, or just completed and
+ * hidden — simply leaves focus where the browser put it.
+ */
+function restoreRowFocus(list: HTMLElement, focus: RowFocus | null): void {
+  if (focus === null) return;
+
+  for (const row of list.querySelectorAll<HTMLElement>('.task')) {
+    if (row.dataset.taskTitle !== focus.title) continue;
+
+    const control = row.querySelector<HTMLElement>(`[data-control="${focus.control}"]`);
+    // A disabled button can't take focus: moving a task to the top disables its
+    // own "up" arrow, so hand focus to the pair's other half rather than
+    // dropping it out of the row entirely.
+    if (control instanceof HTMLButtonElement && control.disabled) {
+      row.querySelector<HTMLElement>('.task-move:not(:disabled)')?.focus();
+      return;
+    }
+
+    control?.focus();
+    return;
+  }
 }
 
 class CheckInController {
@@ -1309,7 +1427,16 @@ class CheckInController {
     const previouslyCompleted =
       slot.kind === 'day-end' ? new Set<string>() : this.completedBeforeCheckIn;
     const visible = tasksForCheckIn(day.tasks, previouslyCompleted);
+
+    // Every edit rebuilds the whole list, which throws away the focused
+    // element. That was survivable while each control was a one-shot click;
+    // it is not for the reorder arrows, where the second press has nothing to
+    // land on and a keyboard user is dumped back to the top of the card after
+    // moving a task one place.
+    const focus = captureRowFocus(this.elements.taskList);
     this.elements.taskList.replaceChildren(...visible.map((task) => this.renderTask(task)));
+    restoreRowFocus(this.elements.taskList, focus);
+
     this.elements.emptyState.hidden = visible.length > 0;
 
     // The one place the recurring check-in grows an extra step: only at
@@ -1370,8 +1497,12 @@ class CheckInController {
       },
       priority: {
         full: prioritiesFull(this.tasks()),
+        ranked: priorityTasks(this.tasks()).length,
         onToggle: () => {
           this.updateTasks(togglePriority(this.tasks(), task.title));
+        },
+        onMove: (direction) => {
+          this.updateTasks(movePriority(this.tasks(), task.title, direction));
         },
       },
     });

@@ -206,6 +206,7 @@ body {
 
 .task-toggle:focus-visible,
 .task-priority:focus-visible,
+.task-move:focus-visible,
 .entry-input:focus-visible,
 .primary-button:focus-visible,
 .ghost-button:focus-visible,
@@ -241,6 +242,48 @@ body {
   font-weight: 600;
   line-height: 1.5;
   color: var(--accent);
+}
+
+/*
+ * The reorder pair on a ranked row. Same hover/focus reveal as the star and the
+ * remove button beside them; disabled at the ends of the list rather than
+ * hidden, so the row doesn't reflow as a task walks to the top.
+ */
+.task-move {
+  flex: none;
+  /* Glyph small enough not to shout, hit area big enough to click at speed. */
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 19px;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--ink-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 140ms ease-out,
+    color 140ms ease-out;
+}
+
+.task:hover .task-move,
+.task-move:focus-visible {
+  opacity: 1;
+}
+
+.task-move:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.task-move:disabled {
+  cursor: default;
+}
+
+.task:hover .task-move:disabled {
+  opacity: 0.25;
 }
 
 /*

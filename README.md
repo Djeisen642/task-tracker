@@ -56,6 +56,11 @@ the rest move up — the open list always reads `1, 2, 3`, never `1, 3, 5` — a
 whatever is still ranked at the end of the day carries into tomorrow in the same
 order.
 
+Reprioritizing is the ▲▼ pair on a ranked row, or **Alt+↑ / Alt+↓** with the row
+focused. The button keeps focus as the row moves, so pressing it three times
+walks something to the top — which is the case this is for: at 11:00 the thing
+that matters changed.
+
 It is entirely optional, in the literal sense: rank nothing and no day file ever
 mentions a priority, and the card looks exactly as it does above. That is also
 why a completed task keeps no rank — the number is a claim about what to do

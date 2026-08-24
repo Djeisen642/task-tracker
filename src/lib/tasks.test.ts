@@ -8,6 +8,7 @@ import {
   isCarriedOver,
   isOpen,
   MAX_PRIORITIES,
+  movePriority,
   normalizePriorities,
   prioritiesFull,
   priorityTasks,
@@ -413,6 +414,78 @@ describe('carryOverTasks with priorities', () => {
       ['Draft the RFC', 1],
       ['Review the checklist', 2],
       ['Answer the survey', undefined],
+    ]);
+  });
+});
+
+describe('movePriority', () => {
+  /** Three ranked tasks and one unranked, in rank order 1, 2, 3. */
+  function ranked(): Task[] {
+    return [
+      { title: 'Ship the rollback', status: 'in-progress', priority: 1 },
+      { title: 'Draft the RFC', status: 'upcoming', priority: 2 },
+      { title: 'Review the checklist', status: 'upcoming', priority: 3 },
+      { title: 'Answer the survey', status: 'upcoming' },
+    ];
+  }
+
+  it('swaps a task with the one above it', () => {
+    expect(ranks(movePriority(ranked(), 'Review the checklist', 'up'))).toEqual([
+      ['Ship the rollback', 1],
+      ['Draft the RFC', 3],
+      ['Review the checklist', 2],
+      ['Answer the survey', undefined],
+    ]);
+  });
+
+  it('swaps a task with the one below it', () => {
+    expect(ranks(movePriority(ranked(), 'Ship the rollback', 'down'))).toEqual([
+      ['Ship the rollback', 2],
+      ['Draft the RFC', 1],
+      ['Review the checklist', 3],
+      ['Answer the survey', undefined],
+    ]);
+  });
+
+  it('walks a task to the top with repeated moves', () => {
+    let tasks = movePriority(ranked(), 'Review the checklist', 'up');
+    tasks = movePriority(tasks, 'Review the checklist', 'up');
+
+    expect(priorityTasks(tasks).map((task) => task.title)).toEqual([
+      'Review the checklist',
+      'Ship the rollback',
+      'Draft the RFC',
+    ]);
+  });
+
+  it('does nothing at either end of the list', () => {
+    expect(movePriority(ranked(), 'Ship the rollback', 'up')).toEqual(ranked());
+    expect(movePriority(ranked(), 'Review the checklist', 'down')).toEqual(ranked());
+  });
+
+  it('does nothing for an unranked task', () => {
+    expect(movePriority(ranked(), 'Answer the survey', 'up')).toEqual(ranked());
+    expect(movePriority(ranked(), 'Nothing by this name', 'down')).toEqual(ranked());
+  });
+
+  it('leaves the tasks it did not move alone', () => {
+    const moved = movePriority(ranked(), 'Draft the RFC', 'down');
+
+    expect(moved[0]).toEqual({ title: 'Ship the rollback', status: 'in-progress', priority: 1 });
+    expect(moved[3]).toEqual({ title: 'Answer the survey', status: 'upcoming' });
+  });
+
+  it('moves one place through the sparse ranks a hand edit can leave', () => {
+    const handEdited: Task[] = [
+      { title: 'a', status: 'upcoming', priority: 2 },
+      { title: 'b', status: 'upcoming', priority: 5 },
+      { title: 'c', status: 'upcoming', priority: 9 },
+    ];
+
+    expect(ranks(movePriority(handEdited, 'c', 'up'))).toEqual([
+      ['a', 1],
+      ['b', 3],
+      ['c', 2],
     ]);
   });
 });

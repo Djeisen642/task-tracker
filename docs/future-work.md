@@ -17,17 +17,17 @@ These ship in v0.1. The app is not usable without them.
 
 ### The check-in loop
 
-| Status | Item                                                                                                                                                                            |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                                                           |
-| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                                                          |
-| done   | Work start / end times, configurable working days (`workDays`), hourly nudges toggleable.                                                                                       |
-| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                                                              |
-| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                                                         |
-| done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in.                                |
-| done   | The first check-in of a day is always the day-start prompt, whatever the hour — a late start or a machine that was off at 09:00 still gets shown the day.                       |
-| done   | An optional top five: star up to five tasks to rank them, and the ranks compact as work is completed. Written as `_(priority N)_`, absent entirely on a day nothing was ranked. |
-| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.                                                                                              |
+| Status | Item                                                                                                                                                                                                        |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                                                                                       |
+| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                                                                                      |
+| done   | Work start / end times, configurable working days (`workDays`), hourly nudges toggleable.                                                                                                                   |
+| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                                                                                          |
+| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                                                                                     |
+| done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in.                                                            |
+| done   | The first check-in of a day is always the day-start prompt, whatever the hour — a late start or a machine that was off at 09:00 still gets shown the day.                                                   |
+| done   | An optional top five: star up to five tasks to rank them, reorder with ▲▼ or Alt+↑/↓, and the ranks compact as work is completed. Written as `_(priority N)_`, absent entirely on a day nothing was ranked. |
+| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.                                                                                                                          |
 
 ### The vault
 

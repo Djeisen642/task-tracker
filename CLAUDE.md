@@ -170,6 +170,16 @@ docs/
   ranked writes no `_(priority …)_` anywhere (that is what makes the feature
   optional rather than another field to fill in), and a full list refuses a
   sixth rather than evicting number five, because five was a decision.
+- **Reordering is two buttons and a keyboard shortcut, not drag-and-drop.** The
+  ranked list is at most five rows in a 420px window, and a drag would still
+  need a keyboard equivalent to be usable at all — so ▲▼ (plus Alt+↑/↓ on the
+  focused row) is the whole feature rather than half of it. It only works
+  because `render()` hands focus back to the same control after rebuilding the
+  list (`captureRowFocus`/`restoreRowFocus`): without that, the second press has
+  nothing to land on and a keyboard user is thrown back to the top of the card
+  after moving a task one place. Rows are matched by comparing `dataset` values,
+  never by building a selector out of a task title — vault content is untrusted,
+  and a title with a quote in it would break the query.
 - **The rank renders inline; nothing is reserved for it.** The first cut gave
   every row a leading star column, hidden until hover — which indented every
   task on the card by 24px on days nobody ranked, i.e. most of them. The number

@@ -180,6 +180,44 @@ export function togglePriority(tasks: readonly Task[], title: string): Task[] {
   );
 }
 
+/** Which way a task moves through the ranking. */
+export type PriorityMove = 'up' | 'down';
+
+/**
+ * Move a ranked task one place up or down the top five, swapping with its
+ * neighbour. A no-op at either end, and for a task that isn't ranked.
+ *
+ * Swapping rather than inserting-and-shifting, because with at most five items
+ * the two are identical for adjacent moves and swapping cannot renumber a task
+ * the user didn't touch. Repeated presses walk a task to the top, which is the
+ * gesture this is really for: something became urgent at 11:00 and needs to be
+ * number one now.
+ */
+export function movePriority(
+  tasks: readonly Task[],
+  title: string,
+  direction: PriorityMove,
+): Task[] {
+  // Normalize first so "one place" is meaningful even if the file arrived with
+  // ranks like 2, 5, 9 from a hand edit.
+  const normalized = normalizePriorities(tasks);
+  const ranked = priorityTasks(normalized);
+
+  const from = ranked.findIndex((task) => sameTask(task.title, title));
+  const to = from + (direction === 'up' ? -1 : 1);
+  if (from === -1 || to < 0 || to >= ranked.length) return normalized;
+
+  const moved = ranked[from];
+  const displaced = ranked[to];
+  if (moved === undefined || displaced === undefined) return normalized;
+
+  return normalized.map((task) => {
+    if (sameTask(task.title, moved.title)) return { ...task, priority: displaced.priority };
+    if (sameTask(task.title, displaced.title)) return { ...task, priority: moved.priority };
+    return task;
+  });
+}
+
 /**
  * Order tasks for the check-in card: today's top five first in rank order, then
  * in-progress, then upcoming, then newly completed.
