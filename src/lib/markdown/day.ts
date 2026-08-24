@@ -22,8 +22,8 @@
  *
  * ## Tasks
  *
- * - [ ] Draft the RFC _(added 2026-07-30)_
- * - [/] Ship the migration rollback
+ * - [ ] Draft the RFC _(priority 2)_ _(added 2026-07-30)_
+ * - [/] Ship the migration rollback _(priority 1)_
  * - [x] Review the release checklist
  *
  * ## Notes
@@ -39,6 +39,13 @@
  * the team file uses for *completion*, because the two files sit in one folder
  * and an unlabelled date that means opposite things in each is a trap for
  * whoever reads the vault next.
+ *
+ * `_(priority N)_` is the user's top five for the day, `1` first. It is optional
+ * in the strongest sense: a day where nothing was ranked carries the suffix
+ * nowhere and reads exactly as day files always have. Ranks are dense (`1…n`)
+ * across the *open* tasks and never sit on a completed one — see
+ * `normalizePriorities`, which is what closes the gap when a ranked task is
+ * finished.
  *
  * ## `format`
  *
@@ -136,6 +143,8 @@ const STATUS_TO_MARKER: Record<TaskStatus, string> = {
 const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
 /** A trailing `_(added 2026-07-30)_` — see the module doc. */
 const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
+/** A trailing `_(priority 2)_` — the user's top five for the day. */
+const PRIORITY_PATTERN = /\s*_\(priority (\d+)\)_\s*$/;
 /** `- 10:15 — text`, accepting an em dash, en dash or hyphen as the separator. */
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 
@@ -155,6 +164,65 @@ function parseFormatVersion(raw: string | undefined): number {
   return Number.isInteger(version) && version >= 1 ? version : 1;
 }
 
+/** What a task line's trailing `_(…)_` annotations said. */
+interface Annotations {
+  title: string;
+  added?: DateKey;
+  priority?: number;
+}
+
+/**
+ * Peel the trailing annotations off a task title.
+ *
+ * They are written in a fixed order (`_(priority 1)_ _(added 2026-07-30)_`) but
+ * are peeled from whichever end they turn up on, because a hand edit is free to
+ * write them the other way round and losing a rank to key order would be a
+ * silent data loss in the one file that holds the data.
+ *
+ * A suffix with nothing in front of it is someone's prose, not an annotation,
+ * and stops the peeling: `- [ ] _(added 2026-07-30)_` is a line about a date,
+ * not a task with an empty title.
+ */
+function stripAnnotations(rawTitle: string): Annotations {
+  let title = rawTitle;
+  let added: DateKey | undefined;
+  let priority: number | undefined;
+
+  for (;;) {
+    const dateMatch = added === undefined ? ADDED_DATE_PATTERN.exec(title) : null;
+    if (dateMatch !== null) {
+      const annotated = dateMatch[1];
+      const stripped = title.slice(0, dateMatch.index).trim();
+      if (annotated === undefined || stripped === '') break;
+
+      added = annotated;
+      title = stripped;
+      continue;
+    }
+
+    const rankMatch = priority === undefined ? PRIORITY_PATTERN.exec(title) : null;
+    if (rankMatch !== null) {
+      const stripped = title.slice(0, rankMatch.index).trim();
+      const rank = Number(rankMatch[1]);
+      // `_(priority 0)_` is not a rank this format can mean anything by, so the
+      // text stays in the title rather than being swallowed.
+      if (stripped === '' || !Number.isInteger(rank) || rank < 1) break;
+
+      priority = rank;
+      title = stripped;
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    title,
+    ...(added === undefined ? {} : { added }),
+    ...(priority === undefined ? {} : { priority }),
+  };
+}
+
 /**
  * `date` is the file's own date, and is the default `added` for any task
  * without the suffix: an unannotated line means "first appeared here", which is
@@ -168,24 +236,22 @@ function parseTasks(lines: readonly string[], date: DateKey): Task[] {
     if (match === null) continue;
 
     const status = MARKER_TO_STATUS[match[1] ?? ''];
-    let title = (match[2] ?? '').trim();
+    const rawTitle = (match[2] ?? '').trim();
     // An unknown marker means someone is using a convention we don't model;
     // skipping keeps the line intact on the next write rather than guessing.
-    if (status === undefined || title === '') continue;
+    if (status === undefined || rawTitle === '') continue;
 
-    let added = date;
-    const dateMatch = ADDED_DATE_PATTERN.exec(title);
-    if (dateMatch !== null) {
-      const annotated = dateMatch[1];
-      const stripped = title.slice(0, dateMatch.index).trim();
-      // A suffix with nothing in front of it is someone's prose, not a task.
-      if (annotated !== undefined && stripped !== '') {
-        title = stripped;
-        added = annotated;
-      }
-    }
+    const { title, added, priority } = stripAnnotations(rawTitle);
 
-    tasks.push({ title, status, added });
+    tasks.push({
+      title,
+      status,
+      added: added ?? date,
+      // An out-of-range or duplicated rank from a hand edit is kept as written
+      // and tidied by `normalizePriorities` on the next edit, rather than being
+      // second-guessed here — parsing repairs nothing, it only reads.
+      ...(priority === undefined ? {} : { priority }),
+    });
   }
 
   return tasks;
@@ -282,8 +348,12 @@ export function serializeDay(day: DayDocument): string {
   const taskLines = day.tasks.map((task) => {
     // Only when it differs from this file's own date — see the module doc.
     const carried = task.added !== undefined && task.added !== day.date;
-    const suffix = carried ? ` _(added ${String(task.added)})_` : '';
-    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
+    const added = carried ? ` _(added ${String(task.added)})_` : '';
+    const rank = task.priority === undefined ? '' : ` _(priority ${String(task.priority)})_`;
+    // Rank first, date last: the date suffix has been the trailing annotation
+    // since the format existed, and every reader — ours included — anchors on
+    // the end of the line to find it.
+    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${rank}${added}`;
   });
   blocks.push(
     [TASKS_HEADING, '', ...(taskLines.length > 0 ? taskLines : ['_No tasks yet._'])].join('\n'),

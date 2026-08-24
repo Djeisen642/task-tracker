@@ -62,10 +62,13 @@ import {
   completedBeforeCheckIn,
   cycleStatus,
   isCarriedOver,
+  MAX_PRIORITIES,
+  prioritiesFull,
   removeTask,
   setTaskStatus,
   summarizeTasks,
   tasksForCheckIn,
+  togglePriority,
   type Task,
 } from './lib/tasks.ts';
 import { formatTrayStatus } from './lib/tray.ts';
@@ -259,13 +262,23 @@ function resolveElements(): Elements {
  */
 function renderTaskRow(
   task: Task,
-  options: { carried?: boolean; onToggle: () => void; onRemove: () => void },
+  options: {
+    carried?: boolean;
+    onToggle: () => void;
+    onRemove: () => void;
+    /**
+     * The ranking control, when this list has one. Omitted by the Team panel:
+     * the top five is the user's own day, not a ranking handed to a report.
+     */
+    priority?: { full: boolean; onToggle: () => void };
+  },
 ): HTMLLIElement {
   const item = document.createElement('li');
   item.className = 'task';
   if (task.status === 'in-progress') item.classList.add('is-in-progress');
   if (task.status === 'completed') item.classList.add('is-completed');
   if (options.carried === true) item.classList.add('is-carried');
+  if (task.priority !== undefined) item.classList.add('is-priority');
 
   const glyphs: Record<Task['status'], string> = {
     upcoming: '',
@@ -293,8 +306,74 @@ function renderTaskRow(
   remove.setAttribute('aria-label', `Remove ${task.title}`);
   remove.addEventListener('click', options.onRemove);
 
-  item.append(toggle, title, remove);
+  if (options.priority === undefined) {
+    item.append(toggle, title, remove);
+    return item;
+  }
+
+  const badge = task.priority === undefined ? null : renderRankBadge(task.priority);
+  const star = renderPriorityButton(task, options.priority);
+  item.append(toggle, ...(badge === null ? [] : [badge]), title, star, remove);
+
   return item;
+}
+
+/**
+ * The rank itself: a small number in front of the title.
+ *
+ * Rendered only for a ranked task, so a day where nothing is ranked keeps the
+ * exact row layout it always had — no reserved column quietly indenting every
+ * task on the card for a feature that day didn't use. `aria-hidden` because the
+ * star button beside it already says "priority 2" in its label, and a bare "2"
+ * read out in front of the title is noise.
+ */
+function renderRankBadge(rank: number): HTMLSpanElement {
+  const badge = document.createElement('span');
+  badge.className = 'task-rank';
+  badge.textContent = String(rank);
+  badge.setAttribute('aria-hidden', 'true');
+  return badge;
+}
+
+/**
+ * The control that puts a task in today's top five or takes it out again.
+ *
+ * It sits beside the remove button and is invisible until the row is hovered or
+ * it takes focus — the same treatment, for the same reason: an optional action
+ * shouldn't add a glyph to every row of a list that is read eight times a day.
+ * What stays on screen is the *rank*, which is information rather than an
+ * affordance.
+ *
+ * A full list disables the star rather than evicting number five: five was a
+ * decision, and silently dropping it to make room for a click is not.
+ */
+function renderPriorityButton(
+  task: Task,
+  options: { full: boolean; onToggle: () => void },
+): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'task-priority';
+
+  const rank = task.priority;
+  if (rank !== undefined) {
+    button.textContent = '★';
+    button.classList.add('is-set');
+    button.title = `Priority ${String(rank)} — click to unrank`;
+    button.setAttribute('aria-label', `${task.title} — priority ${String(rank)}, click to unrank`);
+  } else {
+    button.textContent = '☆';
+    // Nothing to promote finished work to: the rank would be stripped by the
+    // next normalize, so the control says so rather than appearing to work.
+    button.disabled = task.status === 'completed' || options.full;
+    button.title = options.full
+      ? `Top ${String(MAX_PRIORITIES)} is full — unrank something first`
+      : `Add to today's top ${String(MAX_PRIORITIES)}`;
+    button.setAttribute('aria-label', `${task.title} — add to today's priorities`);
+  }
+
+  button.addEventListener('click', options.onToggle);
+  return button;
 }
 
 class CheckInController {
@@ -1288,6 +1367,12 @@ class CheckInController {
       },
       onRemove: () => {
         this.updateTasks(removeTask(this.tasks(), task.title));
+      },
+      priority: {
+        full: prioritiesFull(this.tasks()),
+        onToggle: () => {
+          this.updateTasks(togglePriority(this.tasks(), task.title));
+        },
       },
     });
   }

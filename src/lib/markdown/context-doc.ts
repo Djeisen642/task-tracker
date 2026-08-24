@@ -59,8 +59,8 @@ last_check_in: 14:00
 
 ## Tasks
 
-- [ ] Draft the migration RFC _(added 2026-07-29)_
-- [/] Ship the rollback path
+- [/] Ship the rollback path _(priority 1)_
+- [ ] Draft the migration RFC _(priority 2)_ _(added 2026-07-29)_
 - [x] Review the release checklist _(added 2026-07-31)_
 
 ## Notes
@@ -97,6 +97,29 @@ is v2. That boundary is when the user upgraded, not anything about their work.
 Open tasks (upcoming and in progress) roll over into the next day's file.
 Completed tasks stay in the day that finished them — so to find when something
 was completed, look for the day whose file marks it \`[x]\`.
+
+### Task priorities — what the user chose to focus on
+
+A task may carry \`_(priority N)_\`, \`1\` first. That is the user's own ranking of
+their day: at most five tasks, numbered densely from 1, and only ever on
+**open** tasks. It is the one thing in a day file that records a *decision*
+rather than an event — everything else says what happened, this says what the
+user meant to happen.
+
+Two things follow, and both matter when you summarize:
+
+- **Most days have no ranks at all.** Ranking is optional and unused days are
+  the norm, so an unranked task is **not** "low priority" — it is a task on a
+  day where nothing was ranked, or one the user simply didn't put in the top
+  five. Never report unranked work as deprioritised.
+- **A completed task never keeps its rank.** When a ranked task is finished the
+  number is released and the ones below it move up, so the open list always
+  reads \`1, 2, 3\` rather than \`1, 3, 5\`. This means a day file cannot tell you
+  that a *completed* task was once someone's number one — the ranks you see are
+  the ranking of the work still outstanding as of the last check-in that day.
+  If you need to know whether the day's priorities got done, compare what is
+  ranked at the end of the day against what is marked \`[x]\`, and say that the
+  connection is inferred.
 
 ### Task dates — how long something took
 
@@ -203,6 +226,10 @@ the manager-perspective sibling of \`YYYY-Www.md\`.
   nothing about *when* it'll be done. Note explicitly if a report has nothing
   in one of these sections rather than omitting them silently; a quiet week is
   worth saying so, not worth inventing content to fill.
+- **"What was I meant to be focusing on?"** — read the \`_(priority N)_\` ranks in
+  that day's file, remembering they describe what was still open at the end of
+  the day. A day with no ranks means the user didn't rank that day, not that
+  nothing mattered.
 - **"What's been dragging?" / "What took longest?"** — compare each completed
   task's \`_(added …)_\` date with the date of the file that marks it \`[x]\`. For
   work still open, compare against today. Read the \`## Notes\` around a long

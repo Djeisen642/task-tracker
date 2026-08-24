@@ -101,6 +101,7 @@ src-tauri/
 e2e/
   harness.ts            # startApp(): frozen clock + seeded localStorage vault
   checkin.spec.ts       # The check-in loop, driven in a real browser
+  priorities.spec.ts    # Ranking the day's top five: star, renumber, carry over
   settings.spec.ts      # The settings panel: validation, persistence, live effect
   capture.spec.ts       # Screenshots into docs/screenshots/
 scripts/
@@ -158,6 +159,24 @@ docs/
   why it returns `null` for an empty week rather than a body of "Nothing" bullets
   — those read as authoritative and say nothing. Don't collapse it into
   `weeklyRollup`, whose output lands _in_ the folder next to the guide.
+- **Ranking is optional, and the ranks are dense over the _open_ tasks.**
+  `normalizePriorities` in `tasks.ts` is the whole feature: it renumbers to
+  `1…n`, strips the rank from anything completed, and drops anything past
+  `MAX_PRIORITIES`. Every mutator (`setTaskStatus`, `removeTask`,
+  `togglePriority`, `carryOverTasks`) calls it, so the invariant belongs to the
+  model rather than to whichever caller remembered — and finishing your number
+  two promotes number three instead of leaving the list reading `1, 3, 4`. Two
+  things follow that are easy to "fix" and shouldn't be: a day where nothing was
+  ranked writes no `_(priority …)_` anywhere (that is what makes the feature
+  optional rather than another field to fill in), and a full list refuses a
+  sixth rather than evicting number five, because five was a decision.
+- **The rank renders inline; nothing is reserved for it.** The first cut gave
+  every row a leading star column, hidden until hover — which indented every
+  task on the card by 24px on days nobody ranked, i.e. most of them. The number
+  is now a `.task-rank` span present only on ranked rows, and the star that sets
+  it sits with the remove button and appears on hover. Compare
+  `docs/screenshots/day-start.png` (unranked, pixel-identical to before ranking
+  existed) with `priorities.png` before changing this.
 - **The Markdown is the source of truth.** Not a cache, not an export. If a
   SQLite index is ever added it must be _derived_ and rebuildable — never written
   before the Markdown. See `docs/future-work.md`.
