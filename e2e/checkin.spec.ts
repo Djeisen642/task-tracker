@@ -441,3 +441,104 @@ test('writes a weekly rollup when the day is wrapped up', async ({ page }) => {
   expect(rollup).toContain('# Week 2026-W32');
   expect(rollup).toContain('Shipped it');
 });
+
+test("shows work written into today's file by hand", async ({ page }) => {
+  // The shapes a person or an agent actually writes: no checkbox, a marker we
+  // don't model, a numbered list, a lower-case heading, a subheading, prose,
+  // and an untimed note. The team panel has covered this since the parser was
+  // loosened; the day card — the app's main surface — had not.
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 14, 20),
+    files: {
+      '2026-08-03.md': [
+        '---',
+        'format: 2',
+        'date: 2026-08-03',
+        'work_start: 09:00',
+        'work_end: 17:00',
+        'last_check_in: 13:00',
+        'tags:',
+        '  - migration',
+        '---',
+        '',
+        '# Monday, 3 August 2026',
+        '',
+        'Working from the office today.',
+        '',
+        '## tasks',
+        '',
+        '### Morning',
+        '',
+        '- Take over the migration',
+        '- [>] Pair with @alice on the RFC',
+        '1. Write the postmortem',
+        '  - chase legal first',
+        '',
+        '## Notes',
+        '',
+        '- Undated thought about the reorg',
+        '',
+      ].join('\n'),
+    },
+  });
+
+  await expect(page.locator('.task-title')).toHaveText([
+    'Take over the migration',
+    'Pair with @alice on the RFC',
+    'Write the postmortem',
+  ]);
+
+  await page.click('#done');
+  const written = await readVaultFile(page, '2026-08-03.md');
+
+  // Every hand-written shape still in the file, and the app's own placeholder
+  // never stamped over somebody's prose.
+  expect(written).toContain('- [ ] Take over the migration');
+  expect(written).toContain('- [>] Pair with @alice on the RFC');
+  expect(written).toContain('  - chase legal first');
+  expect(written).toContain('Working from the office today.');
+  expect(written).toContain('- Undated thought about the reorg');
+  expect(written).toContain('  - migration');
+  expect(written).not.toContain('_No tasks yet._');
+
+  // The subheading still introduces the list it labels.
+  expect(written?.indexOf('### Morning')).toBeLessThan(written?.indexOf('- [ ] Take over') ?? 0);
+});
+
+test('ticks one of two near-identical lines in the day card, not both', async ({ page }) => {
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 14, 20),
+    files: {
+      '2026-08-03.md': [
+        '---',
+        'date: 2026-08-03',
+        'work_start: 09:00',
+        'work_end: 17:00',
+        'last_check_in: 13:00',
+        '---',
+        '',
+        '# Monday, 3 August 2026',
+        '',
+        '## Tasks',
+        '',
+        '- [ ] Ship it',
+        '- [ ] ship it',
+        '',
+      ].join('\n'),
+    },
+  });
+
+  const rows = page.locator('.task');
+  await expect(rows).toHaveCount(2);
+  await rows.nth(1).locator('.task-toggle').click();
+
+  // Exactly one row moved. Asserting by index after the click would be wrong:
+  // the card deliberately floats in-progress work to the top, so the row that
+  // changed is no longer where it was clicked.
+  await expect(page.locator('.task.is-in-progress')).toHaveCount(1);
+
+  // Which one changed is only unambiguous in the file, where case is preserved.
+  const written = await readVaultFile(page, '2026-08-03.md');
+  expect(written).toContain('- [ ] Ship it');
+  expect(written).toContain('- [/] ship it');
+});

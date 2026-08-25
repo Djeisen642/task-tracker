@@ -4,9 +4,10 @@ Guidance for working in this repository. Read this before making changes.
 
 ## What this is
 
-**Task Tracker** — an ultra-lightweight Windows system-tray utility that prompts
-you every hour during your workday to log what you're doing: add upcoming tasks,
-move in-progress ones to done, and jot notes. At work start it shows the day's
+**Task Tracker** — an ultra-lightweight system-tray utility (Windows tray, macOS
+menu bar, Linux panel) that prompts you every hour during your workday to log
+what you're doing: add upcoming tasks, move in-progress ones to done, and jot
+notes. At work start it shows the day's
 list prominently; at work end it asks for the final update and tomorrow's plan.
 
 **The vault is the product.** Everything is stored as plain Markdown, one file
@@ -83,12 +84,16 @@ src/
     tasks.ts(.test)      # Task model, status cycle, carry-over
     schedule.ts(.test)   # Slot-based check-in scheduler (the heart of the app)
     settings.ts(.test)   # Settings model, defensive parsing, panel draft + validation
+    tray.ts(.test)       # The tray's status line
     vault.ts(.test)      # VaultPort seam, day load/save, MemoryVault fake
     errors.ts(.test)     # describeError() for native dialogs
     tauri.ts             # Optional native bridge; degrades gracefully in a browser
     markdown/
       frontmatter.ts(.test)  # Tiny scalar-only YAML frontmatter reader/writer
+      sections.ts(.test)     # Owned-vs-unowned section split; what a write preserves
+      task-line.ts(.test)    # The checkbox grammar both file formats share
       day.ts(.test)          # The day file: parse/serialize, preserves hand edits
+      team.ts(.test)         # team.<person>.md: one running file per report
       mentions.ts(.test)     # @person / #tag extraction
       rollup.ts(.test)       # Standup summary + weekly rollup
       context-doc.ts         # CONTEXT.md — the schema guide for agents
@@ -101,7 +106,10 @@ src-tauri/
 e2e/
   harness.ts            # startApp(): frozen clock + seeded localStorage vault
   checkin.spec.ts       # The check-in loop, driven in a real browser
+  priorities.spec.ts    # The top five: star, reorder, renumber, carry over
   settings.spec.ts      # The settings panel: validation, persistence, live effect
+  team.spec.ts          # The Team panel and the day-end manager step
+  expand.spec.ts        # The card's expand toggle
   capture.spec.ts       # Screenshots into docs/screenshots/
 scripts/
   backfill-provenance.ts(.test)  # One-shot: reconstruct task `added` dates in a
@@ -158,12 +166,131 @@ docs/
   why it returns `null` for an empty week rather than a body of "Nothing" bullets
   — those read as authoritative and say nothing. Don't collapse it into
   `weeklyRollup`, whose output lands _in_ the folder next to the guide.
+- **A task is identified by reference, not by its title.** `sameTask` ignores
+  case and surrounding whitespace, which is right for "don't add this twice"
+  and wrong for "which row did the user just click" — a hand-edited file holding
+  `- Ship it` and `- [ ] ship it` is two lines and two rows. Every mutator takes
+  the `Task` object: `setTaskStatus`, `removeTask`, `togglePriority` and
+  `movePriority`. The last one needs care — it normalizes first, and
+  `normalizePriorities` returns a _new_ object for every rank it changes, so the
+  caller's reference is stale by then. It resolves `tasks.indexOf(target)`
+  against the array it was handed, before normalizing; the index survives
+  because normalize is a `map`.
+- **Ranking is optional, and the ranks are dense over the _open_ tasks.**
+  `normalizePriorities` in `tasks.ts` is the whole feature: it renumbers to
+  `1…n`, strips the rank from anything completed, and drops anything past
+  `MAX_PRIORITIES`. Every mutator (`setTaskStatus`, `removeTask`,
+  `togglePriority`, `carryOverTasks`) calls it, and `openDay` runs it once as
+  the app takes ownership of today's file, so no caller has to remember —
+  finishing your number two promotes number three instead of leaving the list
+  reading `1, 3, 4`. The deliberate exceptions are `addTask` (adds nothing
+  ranked) and `parseDay`, which repairs nothing because reading a file is not
+  the moment to rewrite it. `priorityTasks` is open-only for the same reason:
+  five ranks a hand edit left on finished work must not report the top five as
+  full when the card has nothing ranked to show. Two
+  things follow that are easy to "fix" and shouldn't be: a day where nothing was
+  ranked writes no `_(priority …)_` anywhere (that is what makes the feature
+  optional rather than another field to fill in), and a full list refuses a
+  sixth rather than evicting number five, because five was a decision.
+- **Reordering is two buttons and a keyboard shortcut, not drag-and-drop.** The
+  ranked list is at most five rows in a 420px window, and a drag would still
+  need a keyboard equivalent to be usable at all — so ▲▼ (plus Alt+↑/↓ from any
+  control on the row; the `li` itself is not focusable) is the whole feature
+  rather than half of it. Three things it rests on, each of which was a bug
+  first:
+  - **`render()` hands focus back to the same control** after rebuilding the
+    list (`captureRowFocus`/`restoreRowFocus`), so the second press has
+    something to land on. Rows are matched by comparing `dataset` values, never
+    by building a selector out of a task title — vault content is untrusted.
+  - **Only when the keyboard is driving** (`keyboardDriven`). Restoring focus
+    after a _mouse_ click arms a control that draws no ring and is invisible
+    once the pointer leaves the row, so the next Space or Enter re-fires it —
+    a task's status silently cycling in the only copy of that day's notes.
+  - **Unavailable controls are `aria-disabled`, not `disabled`** (`setInert`).
+    A `disabled` button drops focus the instant the attribute lands, which
+    happens mid-gesture as a task reaches the top; focus then fell to the row's
+    _other_ arrow and the next press sent it back down. Every handler on such a
+    control must check the attribute itself, because the click still arrives.
+- **The mouse and the keyboard differ here, and the docs must say so.** Focus
+  follows the row, a pointer does not: click ▲ and the displaced task lands
+  under the cursor, so a second click in the same spot undoes the first. Alt+↑
+  repeats cleanly; the mouse needs re-aiming. Don't write "click it three times
+  to reach the top" again.
+- **The row's controls are under WCAG 2.5.8's 24×24px target size, knowingly.**
+  Four of them (▲▼★×) at 24px would be 96px of a 420px row, taken from the task
+  title. They are 17–18px wide and 21px tall, at `--ink-dim` rather than the
+  faint grey the × used, which is the most that fits. If the card ever gets
+  wider, this is the first thing to spend it on.
+- **The rank renders inline; nothing is reserved for it.** The first cut gave
+  every row a leading star column, hidden until hover — which indented every
+  task on the card by 24px on days nobody ranked, i.e. most of them. The number
+  is now a `.task-rank` span present only on ranked rows, and the star that sets
+  it sits with the remove button inside `.task-controls`, revealed on hover or
+  focus. What an unranked day does still pay is the star's own width: a task
+  title is ~293px against ~312px before the feature (measured at the real
+  420×470 window), which is why the trailing controls share one tight flex box
+  instead of each sitting in the row's 9px gap. Measure it before adding a
+  fourth control, and look at `day-start.png` — its rows are the unranked case.
 - **The Markdown is the source of truth.** Not a cache, not an export. If a
   SQLite index is ever added it must be _derived_ and rebuildable — never written
   before the Markdown. See `docs/future-work.md`.
-- **Hand edits survive.** `parseDay`/`serializeDay` preserve unowned sections and
-  frontmatter keys verbatim. You or an agent may edit a day file directly, and
-  the next app write must not eat it.
+- **Hand edits survive — including inside the sections the app owns.** Whole
+  unowned sections and frontmatter keys were always preserved; everything else
+  in the file was not, and the app rewrites that file on every check-in. Three
+  kinds of content were silently deleted: anything above the first `##` heading,
+  a `###` subheading and its body (that is section _content_, not a section),
+  and any line inside `## Tasks`/`## Notes` that wasn't an item. They now live
+  in `DayDocument.preserved` / `TeamMemberDocument.preserved`, split into what
+  _led_ the item list and what _followed_ it — a `### Morning` subheading
+  re-emitted below the tasks it labels reads as a bug even though nothing was
+  lost. Those are the two positions that survive the app reordering its own
+  items; a paragraph written between two tasks still lands at the end. The
+  content is the guarantee, its exact line number is not. Anything new that
+  reads a section must keep what it doesn't model.
+- **A task is identified by reference, not by its title.** `sameTask` ignores
+  case and surrounding whitespace, which is right for "don't add this twice"
+  and wrong for "which row did the user just click" — a hand-edited file
+  holding `- Ship it` and `- [ ] ship it` is two lines and two rows, and
+  `setTaskStatus`/`removeTask` used to hit both. They take the `Task` object
+  now. Titles remain the key for adding, carrying over, and the team file's
+  `completedDates`, which is the same bug one level down and is written up in
+  `docs/future-work.md`.
+- **Structure detection stops at a code fence or an HTML comment.**
+  `maskedLines` in `sections.ts` marks those regions, and the heading split and
+  both item parsers skip them. Without it a file that _quotes this format_ — a
+  pasted snippet, a schema reminder from `CONTEXT.md` — had its fenced
+  `## Tasks` treated as the real heading, so the user's actual list became an
+  unowned section and the card showed the example task instead. A parked
+  `<!-- - [ ] not yet -->` came back as live work the same way. An _unclosed_
+  fence is deliberately not masked: a stray ``` in prose would otherwise swallow
+  the rest of the file. Masked lines are never dropped — they take the same
+  preserved path as any other unmodelled line.
+- **A marker the app doesn't model is read as upcoming and written back
+  unchanged.** `[-]`, `[>]` and friends mean cancelled or deferred to whoever
+  wrote them. Reading them is what makes them visible; rewriting them as `[ ]`
+  turned somebody's cancelled item into live work that then carried forward
+  every day. `Task.marker` holds the character until the status actually
+  changes, at which point the app does know what the line means.
+- **An indented bullet is not a task.** The model is flat, so parsing a
+  sub-bullet promoted it to a peer of its parent and dropped the indentation
+  from the file — a hierarchy the vault could no longer express. It is
+  preserved as written instead. Depth is judged against the _first_ item in the
+  section, so a list that is wholly indented is still a list of tasks.
+- **The grammar the two formats share lives in one module each.**
+  `task-line.ts` holds the checkbox grammar and `sections.ts` the section split,
+  because a day file and a team file are supposed to agree about both and had
+  each grown their own identical copy. Adding a marker or a bullet shape means
+  editing one file, not two that drift. What stays per-format is what genuinely
+  differs: the day file's `_(added …)_` provenance, the team file's `_(date)_`
+  completion stamp, and their different note stamps (`HH:MM` vs `YYYY-MM-DD`).
+- **Read the file the way people write it, not the way the app writes it.** A
+  task line is any bullet — `-`, `*`, `+`, or `1.` — with the checkbox
+  _optional_, and an unrecognized marker (`[-]`, `[>]`) reads as upcoming rather
+  than being skipped. Owned headings match case-insensitively, so `## tasks` is
+  the tasks section. This is what a report file actually looks like after a
+  human or an agent has typed into it, and every one of those shapes used to be
+  invisible in the app _and_ deleted on the next write. The report was "I can
+  see the item in the Greg file but it's not showing up in the app."
 - **A task keeps the date it first appeared; the suffix is written only when it
   outlives that day.** `_(added YYYY-MM-DD)_` on a day-file task means "this
   predates this file", so its presence _is_ the carried-over marker and a day of
@@ -242,6 +369,20 @@ docs/
   without it the panel is on screen permanently, covering the card, and the app
   looks dead on launch. Any new `hidden` element with a `display` rule needs the
   same line.
+- **Transparency on macOS is off by default and fails silently.** A transparent
+  window there needs _both_ `app.macOSPrivateApi: true` in `tauri.conf.json` and
+  the `macos-private-api` Cargo feature on `tauri`; with only one of them the
+  card paints on an opaque rectangle, and nothing in lint, tests or a Linux/
+  Windows build says a word. The pair is enabled — keep them together. (It also
+  means the app can't ship on the Mac App Store, which is fine: it's a direct
+  download.)
+- **Installers are built per-OS, never cross-compiled.** `tauri build` on a
+  Windows machine makes an `.msi`/`.exe`; on macOS, the universal-target flag
+  from the README makes one `.dmg` covering both chips; this sandbox can
+  prove the Linux `.deb`/`.rpm`/`.AppImage` and nothing else. There is no CI
+  job doing this — a change to packaging needs a manual build on the
+  platform it touches, since the sandbox can't stand in for one it doesn't
+  have.
 - **Filenames are validated in Rust.** `is_safe_name` in `src-tauri/src/vault.rs`
   is the security boundary; the TypeScript `isSafeVaultName` is an early-failure
   convenience. Keep both in sync, and never widen the Rust one to a general path.
@@ -353,9 +494,9 @@ Then all four gates run (~90s for the first `cargo check`; seconds after that).
 Verified in this sandbox. Don't conclude from the first error that Rust can only
 be checked in CI, and don't report the Rust gate as passing without running it.
 
-What this environment lacks is a **desktop webview and a Windows machine**, so
-the following are _reviewed for correctness but never executed_. Verify each on
-real hardware before trusting it. The full list lives in `docs/future-work.md`
+What this environment lacks is a **desktop webview and any real desktop machine**
+(no Windows, no macOS), so the following are _reviewed for correctness but never
+executed_. Verify each on real hardware before trusting it. The full list lives in `docs/future-work.md`
 under "Known unknowns"; the headlines:
 
 - **Windows foreground activation.** `SetForegroundWindow` is refused for a

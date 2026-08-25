@@ -205,6 +205,8 @@ body {
 }
 
 .task-toggle:focus-visible,
+.task-priority:focus-visible,
+.task-move:focus-visible,
 .entry-input:focus-visible,
 .primary-button:focus-visible,
 .ghost-button:focus-visible,
@@ -223,6 +225,129 @@ body {
 .task.is-completed .task-toggle {
   background: var(--done);
   border-color: var(--done);
+}
+
+/*
+ * The rank, in front of the title.
+ *
+ * Present only on a ranked task — nothing is reserved for it — so a card where
+ * nothing is ranked is laid out exactly as it always was, which is the whole
+ * promise of the feature being optional.
+ */
+.task-rank {
+  flex: none;
+  min-width: 9px;
+  margin-top: 1px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--accent);
+}
+
+/*
+ * The trailing controls, packed together.
+ *
+ * Their own flex box with no gap, rather than each sitting in the task row's
+ * 9px gap: every pixel here is taken from the *title*, on every row whether it
+ * is ranked or not, and the card is 420px wide. One reveal for the group, so
+ * the whole cluster fades in together on hover or on focus reaching any of it.
+ */
+.task-controls {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+
+.task:hover .task-controls,
+.task-controls:focus-within {
+  opacity: 1;
+}
+
+/*
+ * The reorder pair on a ranked row. Inert at the ends of the list rather than
+ * hidden, so the row doesn't reflow as a task walks to the top.
+ */
+.task-move {
+  flex: none;
+  /* Glyph small enough not to shout, hit area as big as the row will bear. */
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 21px;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  /* Dimmer than the title, but not the faint grey the × uses — at 10px that
+     reads as a smudge rather than an arrow. */
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 140ms ease-out;
+}
+
+.task-move:hover:not(.is-off) {
+  color: var(--ink);
+}
+
+/*
+ * Unavailable, but still focusable — the `disabled` attribute would drop focus
+ * mid-gesture as a task reaches the end of the list. See `setInert` in main.ts.
+ */
+.task-move.is-off {
+  cursor: default;
+}
+
+.task-move.is-off {
+  color: var(--ink-faint);
+  opacity: 0.5;
+}
+
+/*
+ * The star that ranks and unranks. Invisible until the row is hovered or it
+ * takes focus, exactly like `.task-remove` beside it: an optional action, on a
+ * list read eight times a day, does not get a permanent glyph on every row.
+ */
+.task-priority {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 21px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 140ms ease-out;
+}
+
+.task-priority.is-set {
+  color: var(--accent);
+}
+
+.task-priority:hover:not(.is-off) {
+  color: var(--ink);
+}
+
+/* Full list: the star stays faint, and its tooltip explains why it won't take. */
+.task-priority.is-off {
+  cursor: default;
+}
+
+.task-priority.is-off {
+  color: var(--ink-faint);
+  opacity: 0.5;
+}
+
+/* The top five, marked down the left edge rather than boxed off in a section. */
+.task.is-priority {
+  box-shadow: inset 2px 0 0 rgb(122 162 255 / 55%);
 }
 
 .task-title {
@@ -247,21 +372,18 @@ body {
 
 .task-remove {
   flex: none;
-  margin-top: 1px;
-  padding: 0 4px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 21px;
+  padding: 0;
   font-size: 15px;
   line-height: 1;
   color: var(--ink-faint);
   background: none;
   border: none;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 140ms ease-out;
-}
-
-.task:hover .task-remove,
-.task-remove:focus-visible {
-  opacity: 1;
+  transition: color 140ms ease-out;
 }
 
 .task-remove:hover {

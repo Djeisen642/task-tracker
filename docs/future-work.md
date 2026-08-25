@@ -17,16 +17,17 @@ These ship in v0.1. The app is not usable without them.
 
 ### The check-in loop
 
-| Status | Item                                                                                                                                                      |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                                     |
-| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                                    |
-| done   | Work start / end times, configurable working days (`workDays`), hourly nudges toggleable.                                                                 |
-| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                                        |
-| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                                   |
-| done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in.          |
-| done   | The first check-in of a day is always the day-start prompt, whatever the hour — a late start or a machine that was off at 09:00 still gets shown the day. |
-| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.                                                                        |
+| Status | Item                                                                                                                                                                                                        |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                                                                                       |
+| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                                                                                      |
+| done   | Work start / end times, configurable working days (`workDays`), hourly nudges toggleable.                                                                                                                   |
+| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                                                                                          |
+| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                                                                                     |
+| done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in.                                                            |
+| done   | The first check-in of a day is always the day-start prompt, whatever the hour — a late start or a machine that was off at 09:00 still gets shown the day.                                                   |
+| done   | An optional top five: star up to five tasks to rank them, reorder with ▲▼ or Alt+↑/↓, and the ranks compact as work is completed. Written as `_(priority N)_`, absent entirely on a day nothing was ranked. |
+| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.                                                                                                                          |
 
 ### The vault
 
@@ -93,6 +94,34 @@ fidelity are the whole roadmap now:
 ---
 
 ## Fidelity: what the file can prove
+
+- **Preserve _where_ unmodelled lines sat, not just that they existed.** Prose
+  is kept in two buckets — what led the item list and what followed it — which
+  is right for a subheading above the tasks and wrong for anything written
+  between two items. A second `### Afternoon` heading is dragged below the list,
+  so its tasks read as filed under `### Morning`; a paragraph that says
+  "everything below is blocked" ends up with nothing below it. The fix is to
+  anchor each preserved run to the item it followed rather than to the ends of
+  the section, which survives the app reordering its own items. Deferred with
+  the surgical write below, since both are the same underlying problem: the app
+  re-emits a section instead of editing it.
+- **Write surgically instead of re-emitting the file.** Every save parses the
+  file into a model and writes the whole thing back out, so anything the model
+  doesn't represent survives only because something explicitly preserves it.
+  Three holes were found and closed that way (prose above the first heading,
+  `###` subheadings, non-item lines inside an owned section), and the shape of
+  the bug guarantees there are more: the _next_ unmodelled thing someone writes
+  is at risk by default. The structural fix is to rewrite only the lines that
+  changed and leave the rest byte-identical, which makes preservation the
+  default rather than a list of patches. Deferred because it replaces the whole
+  serializer and its failure mode — a bad patch to the only copy of a day's
+  notes — is worse than what it fixes, but it is the right end state.
+- **A completed team task's date is keyed by its title.** `completedDates` is a
+  `Record<title, date>`, so two tasks a human would call the same thing share
+  one entry, and renaming a completed task by hand drops the date — and with it
+  that task's week in the rollup. Mutations are identified by reference now
+  (see `setTaskStatus`), and the fix here is the same idea one level down: move
+  the date onto the task, where the line it came from can keep it.
 
 - **Task provenance.** _(done — see above the line.)_ A task carries the day it
   first appeared once it outlives that day, so a single line yields start,
@@ -202,11 +231,27 @@ questions to ask of `team.<person>.md`, not screens to build.
 
 ## Task model
 
-Title, status, and the date it first appeared. Candidates, each weighed against
-the friction it adds to a prompt seen eight times a day — and now against a
-second test: **does an agent reading the folder need this stated, or can it
-infer it from the notes?** Grouping and priority it can infer. Elapsed time it
-could not, which is why provenance got built and the rest of this list didn't.
+Title, status, the date it first appeared, and an optional rank. Candidates,
+each weighed against the friction it adds to a prompt seen eight times a day —
+and now against a second test: **does an agent reading the folder need this
+stated, or can it infer it from the notes?** Grouping it can infer. Elapsed time
+it could not, which is why provenance got built.
+
+Ranking was on the wrong side of that test until we looked again: an agent can
+infer what _took_ the most time, but not what the user _decided_ mattered that
+morning, and those come apart precisely on the days worth reviewing. That makes
+it capture, not analysis — so `_(priority N)_` shipped, with the cost kept at
+one click and nothing written on a day nobody ranked. What a _single_
+file can't tell you is which priorities were met: a completed task releases its
+rank, so the file says what was outstanding at the end, not what was promised at
+the start. Most of that is recoverable across files — ranks carry forward, so
+yesterday's file is the ranking today opened with, and anything on it marked
+`[x]` today is a priority that got done. What is genuinely unrecoverable is
+narrower: work ranked and finished within the same day leaves no trace of having
+been ranked. Closing that would mean a rank that outlives its task, which is a
+second, contradictory number on the same line — deferred until there's evidence
+the question gets asked. `CONTEXT.md` documents the cross-file method, so an
+agent doesn't attempt the within-file comparison that cannot work.
 
 - Projects or tags for grouping. `#tag` already exists in notes and costs
   nothing; a first-class field has to beat that.
@@ -223,9 +268,18 @@ could not, which is why provenance got built and the rest of this list didn't.
 
 - Taskbar-aware placement: respect the OS work area, not just the monitor bounds.
 - Per-monitor DPI correctness for the card's size.
-- A signed Windows installer and an auto-update channel.
-- macOS and Linux support (the code is portable; only the tray and positioning
-  have been reasoned about for Windows).
+- Code signing and an auto-update channel: an Authenticode-signed Windows
+  installer, a notarized macOS `.dmg`, and the update endpoint that wants the
+  same keys. Until then every platform greets the download with a warning
+  (README, "Installing an unsigned build").
+- macOS and Linux polish. `pnpm run tauri build` (universal-target flag on
+  macOS, see README) now produces a `.dmg` and deb/rpm/AppImage alongside the
+  Windows installers — but the tray icon is the same colour art on all
+  three, where the macOS menu bar wants a template image that follows the
+  light/dark bar. Decide that with a real menu bar in front of you, not from
+  the docs.
+- A CI job that actually builds the three installers, so a packaging change
+  fails before it lands instead of on the next manual build.
 - Coverage thresholds in CI.
 
 ---
@@ -236,8 +290,8 @@ The Rust compiles and its tests pass — `cargo check`, `cargo test`, `cargo
 clippy --all-targets -- -D warnings` and `cargo fmt --check` were all run
 against this tree, and `Cargo.lock` is committed.
 
-What was **never executed** is anything requiring a desktop webview or a Windows
-machine. The list below is reviewed for correctness only; verify each on real
+What was **never executed** is anything requiring a desktop webview — on any
+platform. The list below is reviewed for correctness only; verify each on real
 hardware before trusting it:
 
 1. **Windows foreground activation.** `SetForegroundWindow` is refused for a
@@ -267,9 +321,21 @@ hardware before trusting it:
    actually darkening the time picker's dropdown.
 8. **The whole loop end to end** — a real workday of hourly prompts producing a
    day file you'd actually want to read back.
-9. **The expand/collapse toggle's `setSize` call**, against a window configured
-   `resizable: false`. Programmatic resize is expected to work regardless of
-   that flag — it's a common pattern for splash-to-main-window transitions —
-   but it's unverified against a real Windows compositor, and so is whether
-   re-invoking `position_checkin` after the resize reliably keeps the window
-   pinned to the same corner rather than a platform re-centering it.
+9. **macOS specifics.** Three things differ there and none has been seen: the
+   card is transparent only because `macOSPrivateApi` + the `macos-private-api`
+   Cargo feature are enabled (without them it paints opaque, and the failure is
+   silent); `ActivationPolicy::Accessory` is what keeps it out of the Dock and
+   the ⌘-Tab switcher, which also means `request_user_attention` has no Dock
+   icon to bounce; and the tray icon is colour art rather than a template image,
+   so check how it sits in a dark menu bar.
+10. **Linux specifics.** Transparency needs a compositing window manager — under
+    a bare X11 session without one the card's rounded corners get a black box
+    behind them. The tray needs a panel that speaks StatusNotifier (GNOME needs
+    an AppIndicator extension; KDE and most others are fine), and `skipTaskbar`
+    is an X11 hint some Wayland compositors ignore.
+11. **The expand/collapse toggle's `setSize` call**, against a window configured
+    `resizable: false`. Programmatic resize is expected to work regardless of
+    that flag — it's a common pattern for splash-to-main-window transitions —
+    but it's unverified against a real Windows compositor, and so is whether
+    re-invoking `position_checkin` after the resize reliably keeps the window
+    pinned to the same corner rather than a platform re-centering it.

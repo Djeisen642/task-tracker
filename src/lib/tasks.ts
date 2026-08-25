@@ -18,6 +18,15 @@ export interface Task {
   title: string;
   status: TaskStatus;
   /**
+   * The checkbox character this task was read from, when it isn't one of the
+   * three the app writes — `[-]`, `[>]`, and other tools' conventions.
+   *
+   * Carried so a write doesn't turn somebody's cancelled or deferred item into
+   * live work. Dropped as soon as the status changes, because at that point the
+   * app does know what the line means. See `renderTaskLine`.
+   */
+  marker?: string;
+  /**
    * The day this task first appeared, preserved as it carries forward.
    *
    * This is the one thing about a task that cannot be recovered by reading the
@@ -31,7 +40,29 @@ export interface Task {
    * that file spans many days and stamps completion instead.
    */
   added?: DateKey;
+  /**
+   * Where this task sits in today's top five, `1` being first.
+   *
+   * Optional, and *staying* optional is the point: a day with nothing ranked
+   * behaves exactly as it did before ranking existed. Only the tasks the user
+   * deliberately picked out carry a number, and the numbers are always a dense
+   * `1…n` over the open ones — see `normalizePriorities`, which is what makes
+   * finishing your number two promote number three rather than leave a hole.
+   *
+   * Never set on a completed task: a rank is a claim about what to do next, so
+   * it leaves with the work. Team-file tasks don't carry one either — the top
+   * five is the user's own day, not a ranking imposed on someone else's.
+   */
+  priority?: number;
 }
+
+/**
+ * How many tasks may carry a rank at once.
+ *
+ * Five because the list has to fit on a card the user glances at eight times a
+ * day, and because a "top ten" is just the task list with extra typing.
+ */
+export const MAX_PRIORITIES = 5;
 
 /** Statuses that mean "still on your plate". */
 export const OPEN_STATUSES: readonly TaskStatus[] = ['upcoming', 'in-progress'];
@@ -66,7 +97,175 @@ export function cycleStatus(status: TaskStatus): TaskStatus {
   }
 }
 
-/** Order tasks for the check-in card: in-progress, then upcoming, then newly completed. */
+/** Strip a rank, without leaving an explicit `undefined` behind to serialize. */
+function withoutPriority(task: Task): Task {
+  if (task.priority === undefined) return task;
+
+  const { priority: _priority, ...rest } = task;
+  return rest;
+}
+
+/**
+ * Ranked tasks with their position in the array, in rank order.
+ *
+ * **Open tasks only.** A rank on a completed task is something only a hand edit
+ * can produce, and every function that reads the ranking has to agree to ignore
+ * it — otherwise five finished rows can report the list as full while the card
+ * shows nothing to unrank. `normalizePriorities` strips those ranks on the next
+ * write; until then they are invisible to the model.
+ *
+ * The index travels with the task because titles are not a safe key: `sameTask`
+ * is case- and whitespace-insensitive, so a hand-edited file can hold two tasks
+ * one title matches.
+ */
+function rankedEntries(tasks: readonly Task[]): { task: Task; index: number }[] {
+  return tasks
+    .map((task, index) => ({ task, index }))
+    .filter(({ task }) => task.priority !== undefined && isOpen(task))
+    .sort((a, b) => (a.task.priority ?? 0) - (b.task.priority ?? 0) || a.index - b.index);
+}
+
+/** The ranked tasks, in rank order. Empty when nothing has been ranked. */
+export function priorityTasks(tasks: readonly Task[]): Task[] {
+  return rankedEntries(tasks).map(({ task }) => task);
+}
+
+/** `true` when all five slots are taken, so nothing else can be promoted. */
+export function prioritiesFull(tasks: readonly Task[]): boolean {
+  return priorityTasks(tasks).length >= MAX_PRIORITIES;
+}
+
+/**
+ * Re-number the ranks to a dense `1…n` over the open tasks that carry one.
+ *
+ * This is the whole behaviour of the feature, in one place: finish your number
+ * two and number three becomes the new number two, rather than the list reading
+ * `1, 3, 4` for the rest of the day. It runs after *every* mutation, because
+ * every mutation can break the invariant — completing, removing, un-ranking,
+ * carrying over into tomorrow, or a hand edit that numbered eight things.
+ *
+ * Three rules, in order:
+ *
+ * 1. A completed task keeps no rank. A rank says "do this next"; the work is
+ *    done, so it leaves with the work rather than occupying a slot.
+ * 2. Ranks compact to `1…n`, keeping their relative order — the user ranked
+ *    *this before that*, and nothing here should reorder that judgement.
+ * 3. Anything past `MAX_PRIORITIES` is unranked. Only reachable by hand-editing
+ *    a day file, since the card stops offering the star at five.
+ */
+export function normalizePriorities(tasks: readonly Task[]): Task[] {
+  const ranked: { rank: number; index: number }[] = [];
+
+  tasks.forEach((task, index) => {
+    const rank = task.priority;
+    // Rule 1: completed work drops out here rather than being renumbered.
+    if (rank === undefined || !isOpen(task)) return;
+    ranked.push({ rank, index });
+  });
+
+  // Ties (two hand-written `_(priority 2)_`s) fall back to file order, so the
+  // result is deterministic rather than dependent on the sort's stability.
+  ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
+
+  const assigned = new Map<number, number>();
+  ranked.slice(0, MAX_PRIORITIES).forEach(({ index }, position) => {
+    assigned.set(index, position + 1);
+  });
+
+  return tasks.map((task, index) => {
+    const rank = assigned.get(index);
+    if (rank === undefined) return withoutPriority(task);
+    return rank === task.priority ? task : { ...task, priority: rank };
+  });
+}
+
+/**
+ * Promote an unranked task to the end of the top five, or drop a ranked one
+ * back out of it — the single action behind the star on each row.
+ *
+ * Deliberately not "set rank 3": choosing a number means comparing against four
+ * other numbers, on a card seen eight times a day. Picking them in order gets
+ * the same list with one click each, and the remaining ranks close up when one
+ * leaves. A full list is a no-op rather than a silent eviction of number five.
+ */
+export function togglePriority(tasks: readonly Task[], target: Task): Task[] {
+  // By reference, for the same reason `setTaskStatus` is. Looking the target up
+  // by title starred *both* of two rows a human would call the same thing —
+  // and, because both then took the same next rank, one click quietly consumed
+  // two of the five slots.
+  if (!tasks.includes(target)) return [...tasks];
+
+  if (target.priority !== undefined) {
+    return normalizePriorities(
+      tasks.map((task) => (task === target ? withoutPriority(task) : task)),
+    );
+  }
+
+  // Ranking finished work would be undone by the very next normalize.
+  if (!isOpen(target) || prioritiesFull(tasks)) return [...tasks];
+
+  const last = tasks.reduce((highest, task) => Math.max(highest, task.priority ?? 0), 0);
+  return normalizePriorities(
+    tasks.map((task) => (task === target ? { ...task, priority: last + 1 } : task)),
+  );
+}
+
+/** Which way a task moves through the ranking. */
+export type PriorityMove = 'up' | 'down';
+
+/**
+ * Move a ranked task one place up or down the top five, swapping with its
+ * neighbour. A no-op at either end, and for a task that isn't ranked.
+ *
+ * Swapping rather than inserting-and-shifting, because with at most five items
+ * the two are identical for adjacent moves and swapping cannot renumber a task
+ * the user didn't touch. Repeated presses walk a task to the top, which is the
+ * gesture this is really for: something became urgent at 11:00 and needs to be
+ * number one now.
+ */
+export function movePriority(
+  tasks: readonly Task[],
+  target: Task,
+  direction: PriorityMove,
+): Task[] {
+  // Resolved against the array the caller handed us, *before* normalizing:
+  // `normalizePriorities` returns a new object for every task whose rank it
+  // changes, so by the time it has run the caller's reference is stale for
+  // exactly the tasks being renumbered — and a reference lookup after it would
+  // silently do nothing. The index survives, because normalize is a `map`.
+  const at = tasks.indexOf(target);
+
+  // Normalize first so "one place" is meaningful even if the file arrived with
+  // ranks like 2, 5, 9 from a hand edit.
+  const normalized = normalizePriorities(tasks);
+  const ranked = rankedEntries(normalized);
+
+  const from = at === -1 ? -1 : ranked.findIndex((entry) => entry.index === at);
+  const to = from + (direction === 'up' ? -1 : 1);
+  if (from === -1 || to < 0 || to >= ranked.length) return normalized;
+
+  const moved = ranked[from];
+  const displaced = ranked[to];
+  if (moved === undefined || displaced === undefined) return normalized;
+
+  // Swapped by position: two tasks whose titles `sameTask` treats as one (a
+  // hand-edited "Review PR" and "review pr") would otherwise both take the same
+  // new rank and quietly delete the other one from the ranking.
+  return normalized.map((task, index) => {
+    if (index === moved.index) return { ...task, priority: displaced.task.priority };
+    if (index === displaced.index) return { ...task, priority: moved.task.priority };
+    return task;
+  });
+}
+
+/**
+ * Order tasks for the check-in card: today's top five first in rank order, then
+ * in-progress, then upcoming, then newly completed.
+ *
+ * The ranked block leads because that is the entire point of ranking — a list
+ * whose top five are scattered through it in status order is a list you still
+ * have to read in full.
+ */
 export function tasksForCheckIn(
   tasks: readonly Task[],
   previouslyCompleted: ReadonlySet<string> = new Set(),
@@ -75,8 +274,14 @@ export function tasksForCheckIn(
   const upcoming: Task[] = [];
   const doneThisSession: Task[] = [];
 
+  // `priorityTasks` is open-only, so a rank a hand edit left on completed work
+  // doesn't drag yesterday's finished task to the top of today's card.
+  const ranked = priorityTasks(tasks);
+
   for (const task of tasks) {
-    if (task.status === 'in-progress') {
+    if (ranked.includes(task)) {
+      continue;
+    } else if (task.status === 'in-progress') {
       inProgress.push(task);
     } else if (task.status === 'upcoming') {
       upcoming.push(task);
@@ -85,7 +290,7 @@ export function tasksForCheckIn(
     }
   }
 
-  return [...inProgress, ...upcoming, ...doneThisSession];
+  return [...ranked, ...inProgress, ...upcoming, ...doneThisSession];
 }
 
 /** Titles that were already done when this check-in opened — hidden until day-end. */
@@ -122,14 +327,27 @@ export function addTask(
   return [...tasks, { title: trimmed, status, ...(added === undefined ? {} : { added }) }];
 }
 
-/** Set the status of the task matching `title`. Returns a new array. */
-export function setTaskStatus(tasks: readonly Task[], title: string, status: TaskStatus): Task[] {
-  return tasks.map((task) => (sameTask(task.title, title) ? { ...task, status } : task));
+/**
+ * Set the status of one task. Returns a new array.
+ *
+ * Identified by *reference*, not by title. `sameTask` deliberately ignores case
+ * and surrounding whitespace so re-typing a carried-over task doesn't duplicate
+ * it, which makes it the wrong key for "which row did the user just click": a
+ * hand-edited file holding `- Ship it` and `- [ ] ship it` is two lines and two
+ * rows, and matching on the title hits both.
+ *
+ * Normalizes on the way out, which is what makes completing your number two
+ * promote number three. Every mutator here does the same, so the `1…n`
+ * invariant is a property of the model rather than something each caller has to
+ * remember — and the check-in card is not the only caller.
+ */
+export function setTaskStatus(tasks: readonly Task[], target: Task, status: TaskStatus): Task[] {
+  return normalizePriorities(tasks.map((task) => (task === target ? { ...task, status } : task)));
 }
 
-/** Remove the task matching `title`. Returns a new array. */
-export function removeTask(tasks: readonly Task[], title: string): Task[] {
-  return tasks.filter((task) => !sameTask(task.title, title));
+/** Remove one task, identified by reference. Returns a new array. */
+export function removeTask(tasks: readonly Task[], target: Task): Task[] {
+  return normalizePriorities(tasks.filter((task) => task !== target));
 }
 
 /**
@@ -146,11 +364,17 @@ export function removeTask(tasks: readonly Task[], title: string): Task[] {
  * demonstrably alive on that day, even if it first appeared earlier.
  */
 export function carryOverTasks(previous: readonly Task[], previousDate: DateKey): Task[] {
-  return previous.filter(isOpen).map((task) => ({
-    title: task.title,
-    status: task.status,
-    added: task.added ?? previousDate,
-  }));
+  return normalizePriorities(
+    previous.filter(isOpen).map((task) => ({
+      title: task.title,
+      status: task.status,
+      added: task.added ?? previousDate,
+      // Yesterday's ranking is the best guess at today's, and it compacts on
+      // the way through: finishing your number one leaves tomorrow opening
+      // with a number one rather than a list that starts at two.
+      ...(task.priority === undefined ? {} : { priority: task.priority }),
+    })),
+  );
 }
 
 /**

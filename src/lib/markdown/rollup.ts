@@ -24,6 +24,23 @@ function titles(day: DayDocument, statuses: readonly string[]): string[] {
   return day.tasks.filter((task) => statuses.includes(task.status)).map((task) => task.title);
 }
 
+/**
+ * Open task titles, today's top five first and in rank order.
+ *
+ * Ordering only — no `(1)` prefix. Both places this feeds are read by someone
+ * scanning a list (standup, a week's "still open"), and the ranking survives
+ * that reading as position, which is what ranking is for. The numbers
+ * themselves live in the day file, which is the record; a rollup is a view.
+ */
+function openTitles(day: DayDocument): string[] {
+  return day.tasks
+    .filter((task) => task.status !== 'completed')
+    .sort(
+      (a, b) => (a.priority ?? Number.MAX_SAFE_INTEGER) - (b.priority ?? Number.MAX_SAFE_INTEGER),
+    )
+    .map((task) => task.title);
+}
+
 function bulletList(items: readonly string[], empty: string): string[] {
   return items.length > 0 ? items.map((item) => `- ${item}`) : [`- ${empty}`];
 }
@@ -44,7 +61,7 @@ export function standupSummary(today: DayDocument, previous: DayDocument | null)
   }
 
   lines.push('Today:');
-  lines.push(...bulletList(titles(today, ['in-progress', 'upcoming']), 'Nothing planned yet'));
+  lines.push(...bulletList(openTitles(today), 'Nothing planned yet'));
 
   const blockers = today.notes.filter((note) => note.text.toLowerCase().includes('#blocker'));
   if (blockers.length > 0) {
@@ -109,7 +126,7 @@ export function weeklyRollup(days: readonly DayDocument[]): string {
   }
   const last = sorted[sorted.length - 1];
   if (last !== undefined) {
-    stillOpen.push(...titles(last, ['in-progress', 'upcoming']));
+    stillOpen.push(...openTitles(last));
   }
 
   const kudos = collectKudos(sorted);
@@ -346,6 +363,11 @@ export function agentWeekBriefing(days: readonly DayDocument[]): string | null {
     'Two things not to misread: "Still open" is the state at the end of the last logged',
     'day, not work that was abandoned; and a day with no entry means nothing was logged,',
     'not that nothing happened.',
+    '',
+    '"Still open" leads with whatever the user ranked as their top priorities for that',
+    'last day, in their order. Ranking is optional and most days have none, so treat the',
+    'order as meaningful only where they used it — an item further down is not work they',
+    'deprioritised.',
     '',
     '---',
     '',

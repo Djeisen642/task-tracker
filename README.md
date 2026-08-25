@@ -1,13 +1,14 @@
 # Task Tracker
 
-An ultra-lightweight Windows tray utility that asks, once an hour, what you're
-working on — and writes the answers to a folder of plain Markdown you can hand to
-an AI agent.
+An ultra-lightweight tray utility — Windows tray, macOS menu bar, Linux panel —
+that asks, once an hour, what you're working on, and writes the answers to a
+folder of plain Markdown you can hand to an AI agent.
 
 At **work start** it shows the day's list, seeded with whatever you didn't finish
 yesterday. **Every hour** it slides in from the top-left to collect updates. At
 **work end** it asks for the final update and next day's plan, then regenerates a
-weekly rollup.
+weekly rollup. Star up to five tasks and they lead the list, renumbering
+themselves as you finish them.
 
 The point isn't the app. The point is that in December, "what did I actually ship
 this year?" and "what has my report been up to?" have real answers.
@@ -28,8 +29,8 @@ work_end: 17:00
 
 ## Tasks
 
+- [/] Ship the rollback path _(priority 1)_ _(added 2026-07-30)_
 - [ ] Draft the migration RFC
-- [/] Ship the rollback path _(added 2026-07-30)_
 - [x] Review the release checklist
 
 ## Notes
@@ -46,6 +47,29 @@ work_end: 17:00
 
 Open tasks roll over to the next day (up to a 4-day gap, so a holiday doesn't
 resurrect a stale list). Completed tasks stay in the day that finished them.
+
+### Your top five
+
+Hover a task (or tab to it) and a **☆** appears at the end of the row: that
+puts it in today's top five. Ranked tasks lead the card as a numbered list and
+carry `_(priority N)_` in the file. Finish your number one and the rest move
+up — the open list always reads `1, 2, 3`, never `1, 3, 5` — and whatever is
+still ranked at the end of the day carries into tomorrow in the same order.
+
+Reprioritizing is the **▲▼** pair on a ranked row, or **Alt+↑ / Alt+↓** while
+any control on that row has focus. The keyboard is the better of the two here:
+focus follows the row as it moves, so holding the key walks a task to the top
+in three presses. With the mouse each click moves the row out from under the
+pointer, so aim at the arrow on the row where the task now is.
+
+![Today's top five, with one row hovered](docs/screenshots/priorities.png)
+
+It is optional in the literal sense: rank nothing and no day file ever mentions
+a priority, and the card is the plain list in the day-start shot below. (The one
+trace ranking leaves on an unranked day is the star's own width — every row's
+title is about 6% narrower than it was before the feature existed.) That is also
+why a completed task keeps no rank: the number is a claim about what to do next,
+so it leaves with the work rather than sitting on a finished line.
 
 A task that outlives the day it appeared picks up `_(added YYYY-MM-DD)_`. That
 one suffix does two jobs: its presence marks the task as carried over, and it
@@ -67,8 +91,17 @@ questions. Point Claude at the folder and ask:
 - "What has @alice been working on this quarter?"
 - "Help me draft my year-end review from these notes."
 
-Hand edits are preserved — sections and frontmatter keys the app doesn't own
-survive its writes untouched, so you and an agent can both write to a day file.
+Hand edits are preserved — sections, frontmatter keys (including Obsidian-style
+block lists), and any prose or subheading inside the sections the app does own
+survive its writes, so you and an agent can both write to a day file. The
+content is kept verbatim; what the app may change is where it sits, since it
+owns the order of the items it models.
+
+It also reads what you write rather than only what it writes: a bullet without a
+checkbox, a numbered list, an unfamiliar `[>]` marker and a lower-case
+`## tasks` heading are all read as tasks and show up in the app. Code fences,
+HTML comments and bullets nested under another task are left alone — they stay
+in the file exactly as written, and never become tasks.
 
 ![The day-start check-in](docs/screenshots/day-start.png)
 
@@ -101,9 +134,9 @@ node --experimental-strip-types scripts/backfill-provenance.ts "$HOME/Documents/
 node --experimental-strip-types scripts/backfill-provenance.ts "$HOME/Documents/TaskTracker" --write
 ```
 
-On Windows the vault is `%USERPROFILE%\Documents\TaskTracker`, or whatever
-`vaultDir` points at. Running it twice is safe — the second pass reports nothing
-to do.
+The vault is `%USERPROFILE%\Documents\TaskTracker` on Windows and
+`~/Documents/TaskTracker` on macOS and Linux, or wherever `vaultDir` points.
+Running it twice is safe — the second pass reports nothing to do.
 
 Two things to expect in the diff:
 
@@ -127,6 +160,24 @@ pnpm install          # deps + git hooks
 pnpm run dev          # browser preview of the card — no Rust needed
 pnpm run tauri dev    # the real desktop app (needs the Rust toolchain)
 ```
+
+On Linux, the webview and tray come from system libraries rather than the
+bundle, so they have to be there before Rust will even compile:
+
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev libsoup-3.0-dev libxdo-dev libssl-dev libdbus-1-dev \
+  build-essential pkg-config file curl wget xdg-utils
+```
+
+`xdg-utils` is only needed to _bundle_ an AppImage — the bundler copies
+`/usr/bin/xdg-open` into the image — but it fails at the very end, after the
+release compile, so it is easier to install up front than to discover.
+
+Windows and macOS need no equivalent: WebView2 ships with Windows 11, and the
+macOS webview is WebKit. macOS additionally needs the Xcode command line tools
+(`xcode-select --install`), which you likely already have if Rust works.
 
 Settings are edited from the **gear on the check-in card** or **Settings…** in
 the tray, and persist to `settings.json` in the app config directory:
@@ -225,6 +276,39 @@ screenshot has already caught a wrong prompt that no assertion did.
 What e2e cannot cover: the tray, window positioning, transparency,
 launch-at-login, and Windows focus behavior. Those need real hardware.
 
+## Building installers
+
+```bash
+pnpm run tauri build                                  # for the machine you're on
+pnpm run tauri build --target universal-apple-darwin  # one macOS build for both chips
+```
+
+Each OS produces its own installers, into `src-tauri/target/release/bundle`
+(`target/universal-apple-darwin/release/bundle` for the universal Mac build):
+
+| Platform | Artifacts                                                      |
+| -------- | -------------------------------------------------------------- |
+| Windows  | `.msi` and an NSIS `.exe`                                      |
+| macOS    | `.app` and a `.dmg` — universal, so one download runs anywhere |
+| Linux    | `.deb`, `.rpm` and an `.AppImage`                              |
+
+There is no cross-compiling: a Windows installer is built on Windows, a `.dmg`
+on macOS. Building all three for a release means running the command above on
+one machine of each OS (or three CI runners, if that gets set up later).
+
+### Installing an unsigned build
+
+Nothing here is code-signed or notarized, and each OS says so in its own way:
+
+- **macOS** refuses a quarantined app outright. Right-click → **Open**, or
+  `xattr -dr com.apple.quarantine "/Applications/Task Tracker.app"`.
+- **Windows** SmartScreen shows "Windows protected your PC" → **More info** →
+  **Run anyway**.
+- **Linux** doesn't care; `chmod +x` the AppImage.
+
+Signing both desktop platforms — and the auto-update channel that wants the same
+keys — is on the list in [`docs/future-work.md`](docs/future-work.md).
+
 ## Stack
 
 Tauri v2, vanilla TypeScript, Vite. No UI framework, on purpose — the app runs
@@ -235,7 +319,7 @@ runs format, lint, typecheck and tests; `pnpm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (461 unit tests plus 82 end-to-end
+Pre-v0.1. The web layer is built and tested (554 unit tests plus 106 end-to-end
 tests driving the real card in a browser), and the Rust layer compiles clean —
 `cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
 all pass.
@@ -244,11 +328,18 @@ Everything above the MVP line in [`docs/future-work.md`](docs/future-work.md) is
 built: the check-in loop, the vault and its rollups, the settings panel, manager
 mode, and the tray.
 
-What has **never run** is the app itself on a Windows desktop. That is the only
-thing standing between this and v0.1. See "Known unknowns" for what needs
-verifying on real hardware, starting with whether the card can take keyboard
-focus under Windows' foreground-activation rules — the one open question that
-could force a design change.
+It **bundles for Windows, macOS and Linux** — the code was portable already, and
+the packaging now says so. Nothing in it is Windows-only: the shell is Tauri v2,
+the vault path resolves per-platform, and the two places that do differ (the
+Dock-less menu-bar app on macOS, transparency needing the macOS private-API
+flag) are handled.
+
+What has **never run** is the app itself on any desktop. That is the only thing
+standing between this and v0.1. See "Known unknowns" for what needs verifying on
+real hardware, starting with whether the card can take keyboard focus under
+Windows' foreground-activation rules — the one open question that could force a
+design change — and, on macOS and Linux, whether the tray icon and the
+transparent card look right rather than merely appear.
 
 ## License
 

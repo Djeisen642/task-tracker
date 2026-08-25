@@ -57,9 +57,69 @@ describe('parseDay', () => {
     expect(day.tasks).toEqual([{ title: 'Starred', status: 'upcoming', added: '2026-08-02' }]);
   });
 
-  it('skips an unknown marker rather than guessing at its meaning', () => {
+  it('reads an unknown marker as upcoming rather than dropping the line', () => {
+    // This used to skip the line "rather than guessing", on the theory that
+    // skipping left it intact. It did not: the next write re-emits the section
+    // from the parsed tasks, so the line was deleted from the only copy.
     const day = parseDay('## Tasks\n\n- [?] Mystery\n- [ ] Real\n', FALLBACK);
-    expect(day.tasks).toEqual([{ title: 'Real', status: 'upcoming', added: '2026-08-02' }]);
+
+    expect(day.tasks).toEqual([
+      { title: 'Mystery', status: 'upcoming', added: '2026-08-02', marker: '?' },
+      { title: 'Real', status: 'upcoming', added: '2026-08-02' },
+    ]);
+    // And the character survives the write, rather than becoming a live `[ ]`.
+    expect(serializeDay(day)).toContain('- [?] Mystery');
+  });
+
+  it('reads a bullet with no checkbox as a task', () => {
+    const day = parseDay('## Tasks\n\n- Ship the migration\n', FALLBACK);
+
+    expect(day.tasks).toEqual([
+      { title: 'Ship the migration', status: 'upcoming', added: '2026-08-02' },
+    ]);
+  });
+
+  it('reads a lower-case section heading', () => {
+    const day = parseDay('## tasks\n\n- [ ] Ship it\n', FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship it']);
+    expect(day.extraSections).toEqual([]);
+  });
+
+  it('preserves prose above the first heading and inside the sections it owns', () => {
+    const source = [
+      '---',
+      'date: 2026-08-02',
+      'work_start: 09:00',
+      'work_end: 17:00',
+      '---',
+      '',
+      '# Sunday, 2 August 2026',
+      '',
+      'Working from the office today.',
+      '',
+      '## Tasks',
+      '',
+      '### Morning',
+      '',
+      '- [ ] Draft the RFC',
+      '',
+      '## Notes',
+      '',
+      '- Something I never got round to timestamping',
+      '',
+    ].join('\n');
+
+    const day = parseDay(source, FALLBACK);
+    expect(day.tasks.map((task) => task.title)).toEqual(['Draft the RFC']);
+
+    const written = serializeDay(day);
+    expect(written).toContain('Working from the office today.');
+    expect(written).toContain('### Morning');
+    expect(written).toContain('- Something I never got round to timestamping');
+
+    // Stable: a second pass neither loses the content nor duplicates it.
+    expect(serializeDay(parseDay(written, FALLBACK))).toBe(written);
   });
 
   it('skips a checkbox with no title', () => {
@@ -373,5 +433,224 @@ work_end: 17:00
       { title: 'Migrate', status: 'in-progress', added: '2026-08-04' },
     ]);
     expect(serializeDay(parseDay(mangled, FALLBACK))).not.toContain('_(added 2026-08-04)_ _(added');
+  });
+});
+
+describe('code fences and comments are opaque to structure', () => {
+  const FENCED = [
+    '---',
+    'date: 2026-08-02',
+    'work_start: 09:00',
+    'work_end: 17:00',
+    '---',
+    '',
+    '# Sunday, 2 August 2026',
+    '',
+    'Format reminder:',
+    '',
+    '```markdown',
+    '## Tasks',
+    '',
+    '- [ ] Example task',
+    '```',
+    '',
+    '## Tasks',
+    '',
+    '- [x] Ship the rollback',
+    '',
+    '## Notes',
+    '',
+    '_No notes yet._',
+    '',
+  ].join('\n');
+
+  it('does not let a fenced heading steal the real section', () => {
+    // The user quoted the file format in their own file. Reading the fenced
+    // `## Tasks` as the heading made their real list an unowned section: the
+    // card showed "Example task" and their actual work was invisible.
+    const day = parseDay(FENCED, FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship the rollback']);
+    expect(day.extraSections).toEqual([]);
+  });
+
+  it('round-trips a fenced block byte for byte', () => {
+    expect(serializeDay(parseDay(FENCED, FALLBACK))).toBe(FENCED);
+  });
+
+  it('does not hoist a fenced bullet out as a task', () => {
+    const source = '## Tasks\n\n- [x] Fix the deploy\n\n```yaml\nsteps:\n  - name: build\n```\n';
+    const day = parseDay(source, FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Fix the deploy']);
+    expect(serializeDay(day)).toContain('  - name: build');
+  });
+
+  it('does not resurrect a task parked inside an HTML comment', () => {
+    const source = '## Tasks\n\n- [ ] Ship it\n\n<!--\n- [ ] Parked until Q4\n-->\n';
+    const day = parseDay(source, FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship it']);
+    expect(serializeDay(day)).toContain('- [ ] Parked until Q4');
+  });
+
+  it('treats an unclosed fence as ordinary prose', () => {
+    // Otherwise one stray ``` in a note silently un-tasks the rest of the file.
+    const day = parseDay('## Tasks\n\n```\n- [ ] Ship it\n', FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship it']);
+  });
+});
+
+describe('preserved prose keeps its side of the day file', () => {
+  it('keeps a subheading above the tasks it labels', () => {
+    const source = [
+      '## Tasks',
+      '',
+      '### Morning',
+      '',
+      '- [ ] Draft the RFC',
+      '',
+      'Chased legal on Tuesday.',
+      '',
+    ].join('\n');
+
+    const written = serializeDay(parseDay(source, FALLBACK));
+    const tasks = written.split('## Tasks')[1]?.split('## Notes')[0] ?? '';
+
+    expect(tasks.trim().split('\n').filter(Boolean)).toEqual([
+      '### Morning',
+      '- [ ] Draft the RFC',
+      'Chased legal on Tuesday.',
+    ]);
+    expect(serializeDay(parseDay(written, FALLBACK))).toBe(written);
+  });
+
+  it('keeps a subheading above the notes it labels', () => {
+    // `parseNotes` has its own copy of this bookkeeping; the tasks test above
+    // does not protect it.
+    const source = ['## Notes', '', '### Standup', '', '- 09:15 — kicked off', ''].join('\n');
+    const written = serializeDay(parseDay(source, FALLBACK));
+    const notes = written.split('## Notes')[1] ?? '';
+
+    expect(notes.trim().split('\n').filter(Boolean)).toEqual([
+      '### Standup',
+      '- 09:15 — kicked off',
+    ]);
+  });
+
+  it('leaves a nested bullet nested', () => {
+    const day = parseDay('## Tasks\n\n- [ ] Release 2.4\n  - [ ] Cut the branch\n', FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Release 2.4']);
+    expect(serializeDay(day)).toContain('  - [ ] Cut the branch');
+  });
+});
+
+describe('task priorities', () => {
+  const RANKED = `---
+format: 2
+date: 2026-08-02
+work_start: 09:00
+work_end: 17:00
+---
+
+# Sunday, 2 August 2026
+
+## Tasks
+
+- [/] Ship the rollback path _(priority 1)_
+- [ ] Draft the RFC _(priority 2)_ _(added 2026-07-30)_
+- [x] Review the checklist
+
+## Notes
+
+_No notes yet._
+`;
+
+  it('reads a rank alongside the added date', () => {
+    expect(parseDay(RANKED, FALLBACK).tasks).toEqual([
+      { title: 'Ship the rollback path', status: 'in-progress', added: '2026-08-02', priority: 1 },
+      { title: 'Draft the RFC', status: 'upcoming', added: '2026-07-30', priority: 2 },
+      { title: 'Review the checklist', status: 'completed', added: '2026-08-02' },
+    ]);
+  });
+
+  it('round-trips a ranked day unchanged', () => {
+    expect(serializeDay(parseDay(RANKED, FALLBACK))).toBe(RANKED);
+  });
+
+  it('writes the rank before the added date', () => {
+    const day = createDay('2026-08-02', '09:00', '17:00', [
+      { title: 'Draft the RFC', status: 'upcoming', added: '2026-07-30', priority: 1 },
+    ]);
+
+    expect(serializeDay(day)).toContain('- [ ] Draft the RFC _(priority 1)_ _(added 2026-07-30)_');
+  });
+
+  it('leaves an unranked day with no priority annotation at all', () => {
+    const day = createDay('2026-08-02', '09:00', '17:00', [
+      { title: 'Draft the RFC', status: 'upcoming' },
+    ]);
+
+    expect(serializeDay(day)).not.toContain('priority');
+  });
+
+  it('accepts a hand edit that writes the two suffixes the other way round', () => {
+    const source = RANKED.replace(
+      '- [ ] Draft the RFC _(priority 2)_ _(added 2026-07-30)_',
+      '- [ ] Draft the RFC _(added 2026-07-30)_ _(priority 2)_',
+    );
+
+    expect(parseDay(source, FALLBACK).tasks[1]).toEqual({
+      title: 'Draft the RFC',
+      status: 'upcoming',
+      added: '2026-07-30',
+      priority: 2,
+    });
+  });
+
+  it('keeps an out-of-range rank as ordinary title text', () => {
+    const source = RANKED.replace('_(priority 1)_', '_(priority 0)_');
+    const task = parseDay(source, FALLBACK).tasks[0];
+
+    expect(task?.title).toBe('Ship the rollback path _(priority 0)_');
+    expect(task?.priority).toBeUndefined();
+  });
+
+  it('refuses an implausibly long rank rather than mangling it on the way out', () => {
+    // `\d+` would accept this, and `String(1e21)` writes it back as `1e+21`,
+    // which no longer parses — the annotation would be swallowed into the title.
+    const source = RANKED.replace('_(priority 1)_', '_(priority 1000)_');
+    const task = parseDay(source, FALLBACK).tasks[0];
+
+    expect(task?.priority).toBeUndefined();
+    expect(task?.title).toBe('Ship the rollback path _(priority 1000)_');
+    expect(serializeDay(parseDay(source, FALLBACK))).toBe(source);
+  });
+
+  it('round-trips a two-digit hand-written rank unchanged', () => {
+    const source = RANKED.replace('_(priority 2)_', '_(priority 42)_');
+
+    expect(parseDay(source, FALLBACK).tasks[1]?.priority).toBe(42);
+    expect(serializeDay(parseDay(source, FALLBACK))).toBe(source);
+  });
+
+  it('serializes what the document holds, including a rank on completed work', () => {
+    // Faithfulness, not endorsement: only a hand edit can produce this, and
+    // `openDay` normalizes it away before the app can write the file back.
+    const day = createDay('2026-08-02', '09:00', '17:00', [
+      { title: 'Review the checklist', status: 'completed', priority: 1 },
+    ]);
+
+    const written = serializeDay(day);
+    expect(written).toContain('- [x] Review the checklist _(priority 1)_');
+    expect(parseDay(written, FALLBACK)).toEqual(day);
+  });
+
+  it('preserves a rank a hand edit put out of order, for the model to tidy', () => {
+    const source = RANKED.replace('_(priority 2)_', '_(priority 9)_');
+
+    expect(parseDay(source, FALLBACK).tasks[1]?.priority).toBe(9);
   });
 });

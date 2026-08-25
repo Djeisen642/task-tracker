@@ -136,10 +136,11 @@ export async function advanceMinutes(page: Page, minutes: number): Promise<void>
  *
  * `added` puts the `_(added …)_` suffix on a task, which is how a file records
  * that the task predates it. Omit it for work that started on `date`.
+ * `priority` puts the `_(priority N)_` suffix on it — the user's top five.
  */
 export function dayFile(
   date: string,
-  tasks: readonly { title: string; marker: ' ' | '/' | 'x'; added?: string }[],
+  tasks: readonly { title: string; marker: ' ' | '/' | 'x'; added?: string; priority?: number }[],
   extra: { lastCheckIn?: string; formatVersion?: number } = {},
 ): string {
   const version = extra.formatVersion ?? 2;
@@ -157,10 +158,11 @@ export function dayFile(
 
   const taskLines =
     tasks.length > 0
-      ? tasks.map(
-          (task) =>
-            `- [${task.marker}] ${task.title}${task.added === undefined ? '' : ` _(added ${task.added})_`}`,
-        )
+      ? tasks.map((task) => {
+          const rank = task.priority === undefined ? '' : ` _(priority ${String(task.priority)})_`;
+          const added = task.added === undefined ? '' : ` _(added ${task.added})_`;
+          return `- [${task.marker}] ${task.title}${rank}${added}`;
+        })
       : ['_No tasks yet._'];
 
   return [

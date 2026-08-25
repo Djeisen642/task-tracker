@@ -22,8 +22,8 @@
  *
  * ## Tasks
  *
- * - [ ] Draft the RFC _(added 2026-07-30)_
- * - [/] Ship the migration rollback
+ * - [ ] Draft the RFC _(priority 2)_ _(added 2026-07-30)_
+ * - [/] Ship the migration rollback _(priority 1)_
  * - [x] Review the release checklist
  *
  * ## Notes
@@ -39,6 +39,21 @@
  * the team file uses for *completion*, because the two files sit in one folder
  * and an unlabelled date that means opposite things in each is a trap for
  * whoever reads the vault next.
+ *
+ * `_(priority N)_` is the user's top five for the day, `1` first. It is optional
+ * in the strongest sense: a day where nothing was ranked carries the suffix
+ * nowhere and reads exactly as day files always have. Ranks are dense (`1…n`)
+ * across the *open* tasks and never sit on a completed one — see
+ * `normalizePriorities`, which is what closes the gap when a ranked task is
+ * finished.
+ *
+ * Both annotations are claims on a *shape* of trailing text, which a title can
+ * collide with: a task literally called "Bump the ticket to _(priority 3)_"
+ * parses as a rank and loses those words the moment the rank is dropped. The
+ * cost is accepted here as it already was for `_(added …)_` — the alternative
+ * is an escaping scheme in a file whose whole point is that a human can read
+ * and edit it — but note the asymmetry: an unwanted `_(added …)_` survives
+ * every app write, while a rank is released by an ordinary click on the star.
  *
  * ## `format`
  *
@@ -60,9 +75,20 @@
  */
 
 import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
-import type { Task, TaskStatus } from '../tasks.ts';
-import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
-import { splitSections, trimBlankEdges, type ExtraSection } from './sections.ts';
+import type { Task } from '../tasks.ts';
+import { parseFrontmatter, scalarField, serializeFrontmatter } from './frontmatter.ts';
+import { isNested, parseTaskLine, renderTaskLine } from './task-line.ts';
+import {
+  emptyPreserved,
+  isPlaceholder,
+  maskedLines,
+  splitPreserved,
+  renderSection,
+  splitOwnedSections,
+  trimBlankEdges,
+  type ExtraSection,
+  type PreservedLines,
+} from './sections.ts';
 
 export type { ExtraSection } from './sections.ts';
 
@@ -114,28 +140,27 @@ export interface DayDocument {
   extraFields: Record<string, string>;
   /** Sections we don't own, kept in file order and re-emitted after Notes. */
   extraSections: ExtraSection[];
+  /**
+   * Lines inside the sections we *do* own that aren't items, plus anything
+   * above the first heading. Kept verbatim — see `PreservedLines`.
+   */
+  preserved: PreservedLines;
 }
 
 const TASKS_HEADING = '## Tasks';
 const NOTES_HEADING = '## Notes';
 
-/** Checkbox marker ↔ status. `/` for in-progress follows the Obsidian Tasks convention. */
-const MARKER_TO_STATUS: Record<string, TaskStatus> = {
-  ' ': 'upcoming',
-  '/': 'in-progress',
-  x: 'completed',
-  X: 'completed',
-};
-
-const STATUS_TO_MARKER: Record<TaskStatus, string> = {
-  upcoming: ' ',
-  'in-progress': '/',
-  completed: 'x',
-};
-
-const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
 /** A trailing `_(added 2026-07-30)_` — see the module doc. */
 const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
+/**
+ * A trailing `_(priority 2)_` — the user's top five for the day.
+ *
+ * Two digits at most. An unbounded `\d+` accepts a number that `String()`
+ * renders in exponent form on the way back out (`1e+21`), which this pattern
+ * then can't match — the annotation would be swallowed into the title and the
+ * round-trip identity would break. Nothing that long was a rank anyway.
+ */
+const PRIORITY_PATTERN = /\s*_\(priority (\d{1,2})\)_\s*$/;
 /** `- 10:15 — text`, accepting an em dash, en dash or hyphen as the separator. */
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 
@@ -155,58 +180,138 @@ function parseFormatVersion(raw: string | undefined): number {
   return Number.isInteger(version) && version >= 1 ? version : 1;
 }
 
+/** What a task line's trailing `_(…)_` annotations said. */
+interface Annotations {
+  title: string;
+  added?: DateKey;
+  priority?: number;
+}
+
+/**
+ * Peel the trailing annotations off a task title.
+ *
+ * They are written in a fixed order (`_(priority 1)_ _(added 2026-07-30)_`) but
+ * are peeled from whichever end they turn up on, because a hand edit is free to
+ * write them the other way round and losing a rank to key order would be a
+ * silent data loss in the one file that holds the data.
+ *
+ * A suffix with nothing in front of it is someone's prose, not an annotation,
+ * and stops the peeling: `- [ ] _(added 2026-07-30)_` is a line about a date,
+ * not a task with an empty title.
+ */
+function stripAnnotations(rawTitle: string): Annotations {
+  let title = rawTitle;
+  let added: DateKey | undefined;
+  let priority: number | undefined;
+
+  for (;;) {
+    const dateMatch = added === undefined ? ADDED_DATE_PATTERN.exec(title) : null;
+    if (dateMatch !== null) {
+      const annotated = dateMatch[1];
+      const stripped = title.slice(0, dateMatch.index).trim();
+      if (annotated === undefined || stripped === '') break;
+
+      added = annotated;
+      title = stripped;
+      continue;
+    }
+
+    const rankMatch = priority === undefined ? PRIORITY_PATTERN.exec(title) : null;
+    if (rankMatch !== null) {
+      const stripped = title.slice(0, rankMatch.index).trim();
+      const rank = Number(rankMatch[1]);
+      // `_(priority 0)_` is not a rank this format can mean anything by, so the
+      // text stays in the title rather than being swallowed.
+      if (stripped === '' || !Number.isInteger(rank) || rank < 1) break;
+
+      priority = rank;
+      title = stripped;
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    title,
+    ...(added === undefined ? {} : { added }),
+    ...(priority === undefined ? {} : { priority }),
+  };
+}
+
 /**
  * `date` is the file's own date, and is the default `added` for any task
  * without the suffix: an unannotated line means "first appeared here", which is
  * what every file written before the field existed is truthfully saying.
  */
-function parseTasks(lines: readonly string[], date: DateKey): Task[] {
+function parseTasks(
+  lines: readonly string[],
+  date: DateKey,
+): { tasks: Task[]; extra: string[]; firstItemAt: number } {
   const tasks: Task[] = [];
+  const extra: string[] = [];
+  let firstItemAt = -1;
+  // Inside a fence or an HTML comment, nothing is an item — see `maskedLines`.
+  const masked = maskedLines(lines);
+  // The indent of the first item sets the list's own level; anything deeper is
+  // a sub-item or a wrapped line, which this flat model cannot hold.
+  let baseIndent = -1;
 
-  for (const line of lines) {
-    const match = TASK_PATTERN.exec(line);
-    if (match === null) continue;
-
-    const status = MARKER_TO_STATUS[match[1] ?? ''];
-    let title = (match[2] ?? '').trim();
-    // An unknown marker means someone is using a convention we don't model;
-    // skipping keeps the line intact on the next write rather than guessing.
-    if (status === undefined || title === '') continue;
-
-    let added = date;
-    const dateMatch = ADDED_DATE_PATTERN.exec(title);
-    if (dateMatch !== null) {
-      const annotated = dateMatch[1];
-      const stripped = title.slice(0, dateMatch.index).trim();
-      // A suffix with nothing in front of it is someone's prose, not a task.
-      if (annotated !== undefined && stripped !== '') {
-        title = stripped;
-        added = annotated;
-      }
+  lines.forEach((line, index) => {
+    const item = masked[index] === true ? null : parseTaskLine(line);
+    if (item === null || (baseIndent !== -1 && isNested(item, baseIndent))) {
+      // Not an item: a paragraph, a `###` subheading, a table. Keep it.
+      if (!isPlaceholder(line)) extra.push(line);
+      return;
     }
 
-    tasks.push({ title, status, added });
-  }
+    if (firstItemAt === -1) firstItemAt = extra.length;
+    if (baseIndent === -1) baseIndent = item.indent;
 
-  return tasks;
+    const { title, added, priority } = stripAnnotations(item.text);
+
+    tasks.push({
+      title,
+      status: item.status,
+      added: added ?? date,
+      // An out-of-range or duplicated rank from a hand edit is kept as written
+      // and tidied by `normalizePriorities` on the next edit, rather than being
+      // second-guessed here — parsing repairs nothing, it only reads.
+      ...(priority === undefined ? {} : { priority }),
+      ...(item.marker === undefined ? {} : { marker: item.marker }),
+    });
+  });
+
+  return { tasks, extra, firstItemAt };
 }
 
-function parseNotes(lines: readonly string[]): Note[] {
+function parseNotes(lines: readonly string[]): {
+  notes: Note[];
+  extra: string[];
+  firstItemAt: number;
+} {
   const notes: Note[] = [];
+  const extra: string[] = [];
+  let firstItemAt = -1;
+  const masked = maskedLines(lines);
 
-  for (const line of lines) {
-    const match = NOTE_PATTERN.exec(line);
-    if (match === null) continue;
+  lines.forEach((line, index) => {
+    const match = masked[index] === true ? null : NOTE_PATTERN.exec(line);
+    const text = (match?.[2] ?? '').trim();
+    if (match === null || text === '') {
+      // An untimed line can't be placed in the day's sequence, so it isn't
+      // modelled — but it is somebody's writing, so it is kept as written.
+      if (!isPlaceholder(line)) extra.push(line);
+      return;
+    }
 
-    const time = match[1] ?? '';
-    const text = (match[2] ?? '').trim();
-    if (text === '') continue;
+    if (firstItemAt === -1) firstItemAt = extra.length;
 
     // Normalize `9:05` to `09:05` so sorting and rendering stay uniform.
-    notes.push({ time: time.padStart(5, '0'), text });
-  }
+    notes.push({ time: (match[1] ?? '').padStart(5, '0'), text });
+  });
 
-  return notes;
+  return { notes, extra, firstItemAt };
 }
 
 /**
@@ -219,45 +324,43 @@ export function parseDay(
   fallback: { date: DateKey; workStart: Clock; workEnd: Clock },
 ): DayDocument {
   const { fields, body } = parseFrontmatter(source);
-  const { sections } = splitSections(body);
+  const { owned, preamble, extraSections } = splitOwnedSections(body, [
+    TASKS_HEADING,
+    NOTES_HEADING,
+  ]);
 
   const extraFields: Record<string, string> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (!OWNED_FIELDS.includes(key)) extraFields[key] = value;
   }
 
-  const date = fields.date ?? fallback.date;
+  const date = scalarField(fields.date) ?? fallback.date;
 
-  let tasks: Task[] = [];
-  let notes: Note[] = [];
-  const extraSections: ExtraSection[] = [];
-
-  for (const section of sections) {
-    if (section.heading === TASKS_HEADING) {
-      tasks = parseTasks(section.lines, date);
-    } else if (section.heading === NOTES_HEADING) {
-      notes = parseNotes(section.lines);
-    } else {
-      extraSections.push({ heading: section.heading, lines: [...section.lines] });
-    }
-  }
+  const parsedTasks = parseTasks(owned.get(TASKS_HEADING) ?? [], date);
+  const parsedNotes = parseNotes(owned.get(NOTES_HEADING) ?? []);
+  const preserved: PreservedLines = {
+    preamble,
+    tasks: splitPreserved(parsedTasks.extra, parsedTasks.firstItemAt),
+    notes: splitPreserved(parsedNotes.extra, parsedNotes.firstItemAt),
+  };
 
   // A malformed hand-edited value is dropped rather than trusted: a bad slot key
   // would suppress check-ins for the rest of the day, which fails silently.
-  const lastCheckIn = fields.last_check_in;
+  const lastCheckIn = scalarField(fields.last_check_in);
   const validLastCheckIn =
     lastCheckIn !== undefined && parseClock(lastCheckIn) !== null ? lastCheckIn : undefined;
 
   return {
-    formatVersion: parseFormatVersion(fields.format),
+    formatVersion: parseFormatVersion(scalarField(fields.format)),
     date,
-    workStart: fields.work_start ?? fallback.workStart,
-    workEnd: fields.work_end ?? fallback.workEnd,
+    workStart: scalarField(fields.work_start) ?? fallback.workStart,
+    workEnd: scalarField(fields.work_end) ?? fallback.workEnd,
     ...(validLastCheckIn === undefined ? {} : { lastCheckIn: validLastCheckIn }),
-    tasks,
-    notes,
+    tasks: parsedTasks.tasks,
+    notes: parsedNotes.notes,
     extraFields,
     extraSections,
+    preserved,
   };
 }
 
@@ -278,23 +381,26 @@ export function serializeDay(day: DayDocument): string {
   const heading = parsed === null ? day.date : describeDate(parsed);
 
   const blocks: string[] = [`# ${heading}`];
+  if (day.preserved.preamble.length > 0) {
+    blocks.push(trimBlankEdges(day.preserved.preamble).join('\n'));
+  }
 
   const taskLines = day.tasks.map((task) => {
     // Only when it differs from this file's own date — see the module doc.
     const carried = task.added !== undefined && task.added !== day.date;
-    const suffix = carried ? ` _(added ${String(task.added)})_` : '';
-    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
+    const added = carried ? ` _(added ${String(task.added)})_` : '';
+    const rank = task.priority === undefined ? '' : ` _(priority ${String(task.priority)})_`;
+    // Rank first, date last: the date suffix has been the trailing annotation
+    // since the format existed, and every reader — ours included — anchors on
+    // the end of the line to find it.
+    return renderTaskLine(task.status, `${task.title.trim()}${rank}${added}`, task.marker);
   });
-  blocks.push(
-    [TASKS_HEADING, '', ...(taskLines.length > 0 ? taskLines : ['_No tasks yet._'])].join('\n'),
-  );
+  blocks.push(renderSection(TASKS_HEADING, taskLines, '_No tasks yet._', day.preserved.tasks));
 
   const noteLines = [...day.notes]
     .sort((a, b) => a.time.localeCompare(b.time))
     .map((note) => `- ${note.time} — ${note.text.trim()}`);
-  blocks.push(
-    [NOTES_HEADING, '', ...(noteLines.length > 0 ? noteLines : ['_No notes yet._'])].join('\n'),
-  );
+  blocks.push(renderSection(NOTES_HEADING, noteLines, '_No notes yet._', day.preserved.notes));
 
   for (const section of day.extraSections) {
     blocks.push([section.heading, '', ...trimBlankEdges(section.lines)].join('\n'));
@@ -321,6 +427,7 @@ export function createDay(
     notes: [],
     extraFields: {},
     extraSections: [],
+    preserved: emptyPreserved(),
   };
 }
 
