@@ -7,16 +7,13 @@ describe('parseTaskLine', () => {
     expect(parseTaskLine('- [ ] Draft the RFC')).toEqual({
       status: 'upcoming',
       text: 'Draft the RFC',
+      indent: 0,
     });
-    expect(parseTaskLine('- [/] Draft the RFC')).toEqual({
-      status: 'in-progress',
-      text: 'Draft the RFC',
-    });
-    expect(parseTaskLine('- [x] Draft the RFC')).toEqual({
-      status: 'completed',
-      text: 'Draft the RFC',
-    });
+    expect(parseTaskLine('- [/] Draft the RFC')?.status).toBe('in-progress');
+    expect(parseTaskLine('- [x] Draft the RFC')?.status).toBe('completed');
     expect(parseTaskLine('- [X] Draft the RFC')?.status).toBe('completed');
+    // The app's own markers are re-derived from the status, so none is carried.
+    expect(parseTaskLine('- [x] Draft the RFC')?.marker).toBeUndefined();
   });
 
   it('reads the shapes people write by hand', () => {
@@ -28,11 +25,21 @@ describe('parseTaskLine', () => {
     expect(parseTaskLine('  - Draft the RFC')?.text).toBe('Draft the RFC');
   });
 
-  it('reads an unknown marker as upcoming rather than discarding the line', () => {
+  it('reads an unknown marker as upcoming, and keeps the character', () => {
+    // Visible in the app, unchanged on disk: `[-]` means cancelled to whoever
+    // wrote it, and rewriting it as `[ ]` makes it live work again.
     expect(parseTaskLine('- [>] Draft the RFC')).toEqual({
       status: 'upcoming',
       text: 'Draft the RFC',
+      marker: '>',
+      indent: 0,
     });
+  });
+
+  it('measures indentation, so a nested bullet can be told apart', () => {
+    expect(parseTaskLine('- Top level')?.indent).toBe(0);
+    expect(parseTaskLine('  - Nested')?.indent).toBe(2);
+    expect(parseTaskLine('\t- Tabbed')?.indent).toBe(1);
   });
 
   it('leaves trailing annotations for the format to interpret', () => {
@@ -61,6 +68,20 @@ describe('renderTaskLine', () => {
 
   it('round-trips with the parser', () => {
     const line = renderTaskLine('in-progress', 'Draft the RFC');
-    expect(parseTaskLine(line)).toEqual({ status: 'in-progress', text: 'Draft the RFC' });
+    expect(parseTaskLine(line)).toEqual({
+      status: 'in-progress',
+      text: 'Draft the RFC',
+      indent: 0,
+    });
+  });
+
+  it('keeps an unmodelled marker until the status actually changes', () => {
+    expect(renderTaskLine('upcoming', 'Cancelled: vendor pulled out', '-')).toBe(
+      '- [-] Cancelled: vendor pulled out',
+    );
+    // Cycled in the app, so the app now knows what the line means.
+    expect(renderTaskLine('in-progress', 'Cancelled: vendor pulled out', '-')).toBe(
+      '- [/] Cancelled: vendor pulled out',
+    );
   });
 });

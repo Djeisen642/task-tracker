@@ -29,10 +29,19 @@ freely — edits are preserved — but changes to this file will be overwritten.
 
 When you add a task, a plain bullet is enough: \`- Ship the migration\` is read as
 an upcoming task, as are a numbered list and a marker this guide doesn't list.
-The app rewrites those lines into its own \`- [ ]\` form the next time it saves.
-Prose you leave inside \`## Tasks\` or \`## Notes\` is kept as written, below the
-items — it is preserved, not modelled, so don't hide anything there you expect
-the app to act on.
+The app rewrites a plain bullet into its own \`- [ ]\` form the next time it saves,
+but a marker it doesn't model — \`[-]\`, \`[>]\` — is left exactly as you wrote it,
+so a cancelled or deferred line stays that way rather than becoming live work.
+
+Four things it will *not* read as a task, and keeps verbatim instead: anything
+inside a fenced code block, anything inside an \`<!-- HTML comment -->\`, a bullet
+indented under another one (there are no sub-tasks in this model, so nesting is
+kept as text rather than flattened), and prose. Prose you leave inside
+\`## Tasks\` or \`## Notes\` is preserved, not modelled: what you write above the
+first item stays above the list, and anything below it — including a paragraph
+between two items — is re-emitted after the list. So don't hide anything there
+that you expect the app to act on, and don't rely on a note written between two
+tasks staying between them.
 
 ## Files
 

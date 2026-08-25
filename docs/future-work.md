@@ -94,6 +94,16 @@ fidelity are the whole roadmap now:
 
 ## Fidelity: what the file can prove
 
+- **Preserve _where_ unmodelled lines sat, not just that they existed.** Prose
+  is kept in two buckets — what led the item list and what followed it — which
+  is right for a subheading above the tasks and wrong for anything written
+  between two items. A second `### Afternoon` heading is dragged below the list,
+  so its tasks read as filed under `### Morning`; a paragraph that says
+  "everything below is blocked" ends up with nothing below it. The fix is to
+  anchor each preserved run to the item it followed rather than to the ends of
+  the section, which survives the app reordering its own items. Deferred with
+  the surgical write below, since both are the same underlying problem: the app
+  re-emits a section instead of editing it.
 - **Write surgically instead of re-emitting the file.** Every save parses the
   file into a model and writes the whole thing back out, so anything the model
   doesn't represent survives only because something explicitly preserves it.

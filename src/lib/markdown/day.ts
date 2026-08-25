@@ -61,11 +61,12 @@
 
 import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
 import type { Task } from '../tasks.ts';
-import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
-import { parseTaskLine, renderTaskLine } from './task-line.ts';
+import { parseFrontmatter, scalarField, serializeFrontmatter } from './frontmatter.ts';
+import { isNested, parseTaskLine, renderTaskLine } from './task-line.ts';
 import {
   emptyPreserved,
   isPlaceholder,
+  maskedLines,
   splitPreserved,
   renderSection,
   splitOwnedSections,
@@ -167,16 +168,22 @@ function parseTasks(
   const tasks: Task[] = [];
   const extra: string[] = [];
   let firstItemAt = -1;
+  // Inside a fence or an HTML comment, nothing is an item — see `maskedLines`.
+  const masked = maskedLines(lines);
+  // The indent of the first item sets the list's own level; anything deeper is
+  // a sub-item or a wrapped line, which this flat model cannot hold.
+  let baseIndent = -1;
 
-  for (const line of lines) {
-    const item = parseTaskLine(line);
-    if (item === null) {
+  lines.forEach((line, index) => {
+    const item = masked[index] === true ? null : parseTaskLine(line);
+    if (item === null || (baseIndent !== -1 && isNested(item, baseIndent))) {
       // Not an item: a paragraph, a `###` subheading, a table. Keep it.
       if (!isPlaceholder(line)) extra.push(line);
-      continue;
+      return;
     }
 
     if (firstItemAt === -1) firstItemAt = extra.length;
+    if (baseIndent === -1) baseIndent = item.indent;
 
     const status = item.status;
     let title = item.text;
@@ -193,8 +200,13 @@ function parseTasks(
       }
     }
 
-    tasks.push({ title, status, added });
-  }
+    tasks.push({
+      title,
+      status,
+      added,
+      ...(item.marker === undefined ? {} : { marker: item.marker }),
+    });
+  });
 
   return { tasks, extra, firstItemAt };
 }
@@ -207,22 +219,23 @@ function parseNotes(lines: readonly string[]): {
   const notes: Note[] = [];
   const extra: string[] = [];
   let firstItemAt = -1;
+  const masked = maskedLines(lines);
 
-  for (const line of lines) {
-    const match = NOTE_PATTERN.exec(line);
+  lines.forEach((line, index) => {
+    const match = masked[index] === true ? null : NOTE_PATTERN.exec(line);
     const text = (match?.[2] ?? '').trim();
     if (match === null || text === '') {
       // An untimed line can't be placed in the day's sequence, so it isn't
       // modelled — but it is somebody's writing, so it is kept as written.
       if (!isPlaceholder(line)) extra.push(line);
-      continue;
+      return;
     }
 
     if (firstItemAt === -1) firstItemAt = extra.length;
 
     // Normalize `9:05` to `09:05` so sorting and rendering stay uniform.
     notes.push({ time: (match[1] ?? '').padStart(5, '0'), text });
-  }
+  });
 
   return { notes, extra, firstItemAt };
 }
@@ -247,7 +260,7 @@ export function parseDay(
     if (!OWNED_FIELDS.includes(key)) extraFields[key] = value;
   }
 
-  const date = fields.date ?? fallback.date;
+  const date = scalarField(fields.date) ?? fallback.date;
 
   const parsedTasks = parseTasks(owned.get(TASKS_HEADING) ?? [], date);
   const parsedNotes = parseNotes(owned.get(NOTES_HEADING) ?? []);
@@ -259,15 +272,15 @@ export function parseDay(
 
   // A malformed hand-edited value is dropped rather than trusted: a bad slot key
   // would suppress check-ins for the rest of the day, which fails silently.
-  const lastCheckIn = fields.last_check_in;
+  const lastCheckIn = scalarField(fields.last_check_in);
   const validLastCheckIn =
     lastCheckIn !== undefined && parseClock(lastCheckIn) !== null ? lastCheckIn : undefined;
 
   return {
-    formatVersion: parseFormatVersion(fields.format),
+    formatVersion: parseFormatVersion(scalarField(fields.format)),
     date,
-    workStart: fields.work_start ?? fallback.workStart,
-    workEnd: fields.work_end ?? fallback.workEnd,
+    workStart: scalarField(fields.work_start) ?? fallback.workStart,
+    workEnd: scalarField(fields.work_end) ?? fallback.workEnd,
     ...(validLastCheckIn === undefined ? {} : { lastCheckIn: validLastCheckIn }),
     tasks: parsedTasks.tasks,
     notes: parsedNotes.notes,
@@ -302,7 +315,7 @@ export function serializeDay(day: DayDocument): string {
     // Only when it differs from this file's own date — see the module doc.
     const carried = task.added !== undefined && task.added !== day.date;
     const suffix = carried ? ` _(added ${String(task.added)})_` : '';
-    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`);
+    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`, task.marker);
   });
   blocks.push(renderSection(TASKS_HEADING, taskLines, '_No tasks yet._', day.preserved.tasks));
 

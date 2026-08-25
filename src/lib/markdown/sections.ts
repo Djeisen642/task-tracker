@@ -156,17 +156,89 @@ interface Section {
   lines: string[];
 }
 
+/**
+ * Which lines are inside a fenced code block or an HTML comment.
+ *
+ * Structure detection has to stop at the edge of a code fence. A file that
+ * quotes this very format — a pasted snippet, a schema reminder, a log excerpt
+ * — otherwise has its fenced `## Tasks` treated as the real heading and its
+ * fenced `- [ ] example` treated as a real task, while the user's actual list
+ * becomes an unowned section they can no longer see in the app. An HTML comment
+ * is the same story with intent attached: a task someone deliberately parked
+ * inside `<!-- … -->` came back as live work and carried forward daily.
+ *
+ * An *unclosed* fence or comment is deliberately not masked. A stray triple
+ * backtick in prose would otherwise swallow the rest of the file, which turns a
+ * cosmetic mistake into an invisible task list.
+ *
+ * Masked lines are not dropped: every caller treats them as "not an item",
+ * which is the path that already preserves them verbatim.
+ */
+export function maskedLines(lines: readonly string[]): boolean[] {
+  const masked = lines.map(() => false);
+  let fenceChar = '';
+  let fenceWidth = 0;
+  let openedAt = -1;
+
+  const closeFrom = (index: number): void => {
+    for (let i = openedAt; i <= index; i += 1) masked[i] = true;
+    openedAt = -1;
+    fenceChar = '';
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? '';
+
+    if (openedAt === -1) {
+      const fence = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      const run = fence?.[1] ?? '';
+      const info = (fence?.[2] ?? '').trim();
+      // A backtick fence's info string may not itself contain a backtick.
+      if (fence !== null && !(run.startsWith('`') && info.includes('`'))) {
+        fenceChar = run[0] ?? '`';
+        fenceWidth = run.length;
+        openedAt = index;
+        continue;
+      }
+
+      if (line.includes('<!--')) {
+        if (line.includes('-->')) {
+          masked[index] = true;
+        } else {
+          fenceChar = '<';
+          openedAt = index;
+        }
+      }
+      continue;
+    }
+
+    if (fenceChar === '<') {
+      if (line.includes('-->')) closeFrom(index);
+      continue;
+    }
+
+    const close = /^ {0,3}(`{3,}|~{3,})\s*$/.exec(line);
+    const run = close?.[1] ?? '';
+    if (close !== null && run.startsWith(fenceChar) && run.length >= fenceWidth) closeFrom(index);
+  }
+
+  return masked;
+}
+
 /** Split a body into `##`-delimited sections, keeping any preamble separate. */
 export function splitSections(body: string): { preamble: string[]; sections: Section[] } {
   const preamble: string[] = [];
   const sections: Section[] = [];
   let current: Section | null = null;
 
-  for (const line of body.split('\n')) {
-    if (/^##\s+/.test(line)) {
+  const lines = body.split('\n');
+  const masked = maskedLines(lines);
+
+  lines.forEach((line, index) => {
+    if (/^##\s+/.test(line) && masked[index] !== true) {
       current = { heading: line.trim(), lines: [] };
       sections.push(current);
-      continue;
+      return;
     }
 
     if (current === null) {
@@ -174,7 +246,7 @@ export function splitSections(body: string): { preamble: string[]; sections: Sec
     } else {
       current.lines.push(line);
     }
-  }
+  });
 
   return { preamble, sections };
 }

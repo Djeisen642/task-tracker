@@ -64,9 +64,11 @@ describe('parseDay', () => {
     const day = parseDay('## Tasks\n\n- [?] Mystery\n- [ ] Real\n', FALLBACK);
 
     expect(day.tasks).toEqual([
-      { title: 'Mystery', status: 'upcoming', added: '2026-08-02' },
+      { title: 'Mystery', status: 'upcoming', added: '2026-08-02', marker: '?' },
       { title: 'Real', status: 'upcoming', added: '2026-08-02' },
     ]);
+    // And the character survives the write, rather than becoming a live `[ ]`.
+    expect(serializeDay(day)).toContain('- [?] Mystery');
   });
 
   it('reads a bullet with no checkbox as a task', () => {
@@ -431,5 +433,116 @@ work_end: 17:00
       { title: 'Migrate', status: 'in-progress', added: '2026-08-04' },
     ]);
     expect(serializeDay(parseDay(mangled, FALLBACK))).not.toContain('_(added 2026-08-04)_ _(added');
+  });
+});
+
+describe('code fences and comments are opaque to structure', () => {
+  const FENCED = [
+    '---',
+    'date: 2026-08-02',
+    'work_start: 09:00',
+    'work_end: 17:00',
+    '---',
+    '',
+    '# Sunday, 2 August 2026',
+    '',
+    'Format reminder:',
+    '',
+    '```markdown',
+    '## Tasks',
+    '',
+    '- [ ] Example task',
+    '```',
+    '',
+    '## Tasks',
+    '',
+    '- [x] Ship the rollback',
+    '',
+    '## Notes',
+    '',
+    '_No notes yet._',
+    '',
+  ].join('\n');
+
+  it('does not let a fenced heading steal the real section', () => {
+    // The user quoted the file format in their own file. Reading the fenced
+    // `## Tasks` as the heading made their real list an unowned section: the
+    // card showed "Example task" and their actual work was invisible.
+    const day = parseDay(FENCED, FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship the rollback']);
+    expect(day.extraSections).toEqual([]);
+  });
+
+  it('round-trips a fenced block byte for byte', () => {
+    expect(serializeDay(parseDay(FENCED, FALLBACK))).toBe(FENCED);
+  });
+
+  it('does not hoist a fenced bullet out as a task', () => {
+    const source = '## Tasks\n\n- [x] Fix the deploy\n\n```yaml\nsteps:\n  - name: build\n```\n';
+    const day = parseDay(source, FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Fix the deploy']);
+    expect(serializeDay(day)).toContain('  - name: build');
+  });
+
+  it('does not resurrect a task parked inside an HTML comment', () => {
+    const source = '## Tasks\n\n- [ ] Ship it\n\n<!--\n- [ ] Parked until Q4\n-->\n';
+    const day = parseDay(source, FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship it']);
+    expect(serializeDay(day)).toContain('- [ ] Parked until Q4');
+  });
+
+  it('treats an unclosed fence as ordinary prose', () => {
+    // Otherwise one stray ``` in a note silently un-tasks the rest of the file.
+    const day = parseDay('## Tasks\n\n```\n- [ ] Ship it\n', FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship it']);
+  });
+});
+
+describe('preserved prose keeps its side of the day file', () => {
+  it('keeps a subheading above the tasks it labels', () => {
+    const source = [
+      '## Tasks',
+      '',
+      '### Morning',
+      '',
+      '- [ ] Draft the RFC',
+      '',
+      'Chased legal on Tuesday.',
+      '',
+    ].join('\n');
+
+    const written = serializeDay(parseDay(source, FALLBACK));
+    const tasks = written.split('## Tasks')[1]?.split('## Notes')[0] ?? '';
+
+    expect(tasks.trim().split('\n').filter(Boolean)).toEqual([
+      '### Morning',
+      '- [ ] Draft the RFC',
+      'Chased legal on Tuesday.',
+    ]);
+    expect(serializeDay(parseDay(written, FALLBACK))).toBe(written);
+  });
+
+  it('keeps a subheading above the notes it labels', () => {
+    // `parseNotes` has its own copy of this bookkeeping; the tasks test above
+    // does not protect it.
+    const source = ['## Notes', '', '### Standup', '', '- 09:15 — kicked off', ''].join('\n');
+    const written = serializeDay(parseDay(source, FALLBACK));
+    const notes = written.split('## Notes')[1] ?? '';
+
+    expect(notes.trim().split('\n').filter(Boolean)).toEqual([
+      '### Standup',
+      '- 09:15 — kicked off',
+    ]);
+  });
+
+  it('leaves a nested bullet nested', () => {
+    const day = parseDay('## Tasks\n\n- [ ] Release 2.4\n  - [ ] Cut the branch\n', FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Release 2.4']);
+    expect(serializeDay(day)).toContain('  - [ ] Cut the branch');
   });
 });

@@ -185,6 +185,27 @@ docs/
   now. Titles remain the key for adding, carrying over, and the team file's
   `completedDates`, which is the same bug one level down and is written up in
   `docs/future-work.md`.
+- **Structure detection stops at a code fence or an HTML comment.**
+  `maskedLines` in `sections.ts` marks those regions, and the heading split and
+  both item parsers skip them. Without it a file that _quotes this format_ — a
+  pasted snippet, a schema reminder from `CONTEXT.md` — had its fenced
+  `## Tasks` treated as the real heading, so the user's actual list became an
+  unowned section and the card showed the example task instead. A parked
+  `<!-- - [ ] not yet -->` came back as live work the same way. An _unclosed_
+  fence is deliberately not masked: a stray ``` in prose would otherwise swallow
+  the rest of the file. Masked lines are never dropped — they take the same
+  preserved path as any other unmodelled line.
+- **A marker the app doesn't model is read as upcoming and written back
+  unchanged.** `[-]`, `[>]` and friends mean cancelled or deferred to whoever
+  wrote them. Reading them is what makes them visible; rewriting them as `[ ]`
+  turned somebody's cancelled item into live work that then carried forward
+  every day. `Task.marker` holds the character until the status actually
+  changes, at which point the app does know what the line means.
+- **An indented bullet is not a task.** The model is flat, so parsing a
+  sub-bullet promoted it to a peer of its parent and dropped the indentation
+  from the file — a hierarchy the vault could no longer express. It is
+  preserved as written instead. Depth is judged against the _first_ item in the
+  section, so a list that is wholly indented is still a list of tasks.
 - **The grammar the two formats share lives in one module each.**
   `task-line.ts` holds the checkbox grammar and `sections.ts` the section split,
   because a day file and a team file are supposed to agree about both and had
@@ -199,7 +220,7 @@ docs/
   the tasks section. This is what a report file actually looks like after a
   human or an agent has typed into it, and every one of those shapes used to be
   invisible in the app _and_ deleted on the next write. The report was "I can
-  see the item in the Greg file but it's not showing up in the app.
+  see the item in the Greg file but it's not showing up in the app."
 - **A task keeps the date it first appeared; the suffix is written only when it
   outlives that day.** `_(added YYYY-MM-DD)_` on a day-file task means "this
   predates this file", so its presence _is_ the carried-over marker and a day of

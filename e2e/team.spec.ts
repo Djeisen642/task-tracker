@@ -465,7 +465,9 @@ test('shows work written into a report file by hand', async ({ page }) => {
 
   const written = await readVaultFile(page, 'team.greg.md');
   expect(written).toContain('- [ ] Take over the migration');
-  expect(written).toContain('- [ ] Pair with @alice on the RFC');
+  // The `[>]` marker is kept, not coerced to `[ ]`: it means something to
+  // whoever wrote it, and rewriting it makes a parked item live work again.
+  expect(written).toContain('- [>] Pair with @alice on the RFC');
   expect(written).toContain('- [ ] Write the postmortem');
   expect(written).toContain('- [x] Reviewed the design doc _(2026-07-31)_');
   expect(written).toContain('Joined in June. Prefers written feedback.');

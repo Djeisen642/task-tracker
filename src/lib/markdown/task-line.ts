@@ -37,11 +37,24 @@ const STATUS_TO_MARKER: Record<TaskStatus, string> = {
  */
 const TASK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[(.)\]\s*)?(.*)$/;
 
-/** A task line's two parts: where it stands, and everything after the checkbox. */
+/** What one task line says. */
 export interface TaskLine {
   status: TaskStatus;
   /** Still carries whatever trailing annotations the format defines. */
   text: string;
+  /**
+   * The raw checkbox character, when it isn't one this app models.
+   *
+   * `[-]`, `[>]`, `[?]` and friends come from conventions other tools use —
+   * cancelled, forwarded, waiting. Reading them as upcoming is what makes them
+   * visible in the app; *writing* them back as `[ ]` is what turns somebody's
+   * cancelled item into live work that carries forward every day after. So the
+   * character is kept and re-emitted verbatim unless the user changes the
+   * task's status through the app.
+   */
+  marker?: string;
+  /** Leading whitespace, in characters — see `isNested`. */
+  indent: number;
 }
 
 /**
@@ -58,10 +71,39 @@ export function parseTaskLine(line: string): TaskLine | null {
   const text = (match[2] ?? '').trim();
   if (text === '') return null;
 
-  return { status: MARKER_TO_STATUS[match[1] ?? ' '] ?? 'upcoming', text };
+  const marker = match[1];
+  const known = marker === undefined ? undefined : MARKER_TO_STATUS[marker];
+
+  return {
+    status: known ?? 'upcoming',
+    text,
+    // Only an unmodelled marker is worth carrying; the app's own three are
+    // re-derived from the status, which is the thing that can change.
+    ...(marker !== undefined && known === undefined ? { marker } : {}),
+    indent: (/^\s*/.exec(line)?.[0] ?? '').length,
+  };
 }
 
-/** Write a task line in the app's canonical form. */
-export function renderTaskLine(status: TaskStatus, text: string): string {
-  return `- [${STATUS_TO_MARKER[status]}] ${text}`;
+/**
+ * `true` when this line sits deeper than the section's first item — a sub-task,
+ * or a wrapped continuation of the line above.
+ *
+ * The model is a flat list, so a nested bullet has nowhere to go: parsing it as
+ * a task promotes it to a peer of its parent and drops its indentation from the
+ * file, which is a hierarchy the vault can no longer express. Treating it as
+ * unmodelled content keeps the file exactly as written. Measured against the
+ * *first* item rather than against zero, so a list that is wholly indented is
+ * still a list of tasks.
+ */
+export function isNested(item: TaskLine, baseIndent: number): boolean {
+  return item.indent > baseIndent;
+}
+
+/**
+ * Write a task line, keeping an unmodelled marker where the status still
+ * matches what that marker was read as.
+ */
+export function renderTaskLine(status: TaskStatus, text: string, marker?: string): string {
+  const keep = marker !== undefined && marker !== '' && status === 'upcoming';
+  return `- [${keep ? marker : STATUS_TO_MARKER[status]}] ${text}`;
 }

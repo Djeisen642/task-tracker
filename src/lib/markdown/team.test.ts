@@ -65,10 +65,11 @@ describe('parseTeamMember', () => {
     const member = parseTeamMember('## Tasks\n\n- [?] Mystery\n- [ ] Real\n', FALLBACK);
 
     expect(member.tasks).toEqual([
-      { title: 'Mystery', status: 'upcoming' },
+      { title: 'Mystery', status: 'upcoming', marker: '?' },
       { title: 'Real', status: 'upcoming' },
     ]);
-    expect(serializeTeamMember(member)).toContain('- [ ] Mystery');
+    // Visible in the app, and still `[?]` on disk — see `renderTaskLine`.
+    expect(serializeTeamMember(member)).toContain('- [?] Mystery');
   });
 
   it('reads a bullet with no checkbox as a task', () => {
@@ -132,14 +133,21 @@ describe('parseTeamMember', () => {
     expect(serializeTeamMember(member).match(/_Nothing tracked yet\._/g)).toHaveLength(1);
   });
 
-  it('flattens a nested bullet into a task of its own', () => {
-    // There is no sub-task in this model, so an indented bullet becomes a task.
-    // Documented rather than fixed: the alternative on the way in was deleting
-    // the line, and inventing a hierarchy the file format cannot express would
-    // be worse than reading it as the flat list the app actually stores.
+  it('leaves a nested bullet nested instead of promoting it to a task', () => {
+    // There is no sub-task in this model. Parsing the indented line made it a
+    // peer of its parent and dropped the indentation from the file, destroying
+    // a hierarchy the vault cannot re-express; preserving it keeps the file.
     const member = parseTeamMember('## Tasks\n\n- [ ] Parent\n  - detail\n', FALLBACK);
 
-    expect(member.tasks.map((task) => task.title)).toEqual(['Parent', 'detail']);
+    expect(member.tasks.map((task) => task.title)).toEqual(['Parent']);
+    expect(serializeTeamMember(member)).toContain('  - detail');
+  });
+
+  it('still reads a list that is wholly indented', () => {
+    // Indentation is judged against the first item, not against zero.
+    const member = parseTeamMember('## Tasks\n\n  - [ ] One\n  - [ ] Two\n', FALLBACK);
+
+    expect(member.tasks.map((task) => task.title)).toEqual(['One', 'Two']);
   });
 
   it('keeps a subheading above the list it introduces', () => {
@@ -331,7 +339,9 @@ describe('serializeTeamMember', () => {
 
   it('falls back to the raw key when the person is somehow unset', () => {
     const member: TeamMemberDocument = { ...createTeamMember('alice'), person: '' };
-    expect(serializeTeamMember(member)).toContain('person: \n');
+    // Written without a trailing space — an empty value is `person:`, which is
+    // what every editor and formatter would leave behind anyway.
+    expect(serializeTeamMember(member)).toContain('person:\n');
   });
 });
 

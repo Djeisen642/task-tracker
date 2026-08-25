@@ -40,11 +40,12 @@
 
 import type { DateKey } from '../dates.ts';
 import type { Task } from '../tasks.ts';
-import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
-import { parseTaskLine, renderTaskLine } from './task-line.ts';
+import { parseFrontmatter, scalarField, serializeFrontmatter } from './frontmatter.ts';
+import { isNested, parseTaskLine, renderTaskLine } from './task-line.ts';
 import {
   emptyPreserved,
   isPlaceholder,
+  maskedLines,
   splitPreserved,
   renderSection,
   splitOwnedSections,
@@ -104,16 +105,22 @@ function parseTasks(lines: readonly string[]): {
   const completedDates: Record<string, DateKey> = {};
   const extra: string[] = [];
   let firstItemAt = -1;
+  // Inside a fence or an HTML comment, nothing is an item — see `maskedLines`.
+  const masked = maskedLines(lines);
+  // The indent of the first item sets the list's own level; anything deeper is
+  // a sub-item or a wrapped line, which this flat model cannot hold.
+  let baseIndent = -1;
 
-  for (const line of lines) {
-    const item = parseTaskLine(line);
-    if (item === null) {
+  lines.forEach((line, index) => {
+    const item = masked[index] === true ? null : parseTaskLine(line);
+    if (item === null || (baseIndent !== -1 && isNested(item, baseIndent))) {
       // Not an item: a paragraph, a `###` subheading, a table. Keep it.
       if (!isPlaceholder(line)) extra.push(line);
-      continue;
+      return;
     }
 
     if (firstItemAt === -1) firstItemAt = extra.length;
+    if (baseIndent === -1) baseIndent = item.indent;
 
     const status = item.status;
     let title = item.text;
@@ -127,9 +134,17 @@ function parseTasks(lines: readonly string[]): {
       }
     }
 
-    if (title === '') continue;
-    tasks.push({ title, status });
-  }
+    // A line whose whole title was a completion stamp (`- [x] _(2026-08-03)_`)
+    // is not a task, and must not simply vanish — it takes the preserved path
+    // like any other line the format doesn't model.
+    if (title === '') {
+      extra.push(line);
+      if (firstItemAt === extra.length - 1) firstItemAt = -1;
+      return;
+    }
+
+    tasks.push({ title, status, ...(item.marker === undefined ? {} : { marker: item.marker }) });
+  });
 
   return { tasks, completedDates, extra, firstItemAt };
 }
@@ -142,21 +157,22 @@ function parseNotes(lines: readonly string[]): {
   const notes: TeamNote[] = [];
   const extra: string[] = [];
   let firstItemAt = -1;
+  const masked = maskedLines(lines);
 
-  for (const line of lines) {
-    const match = NOTE_PATTERN.exec(line);
+  lines.forEach((line, index) => {
+    const match = masked[index] === true ? null : NOTE_PATTERN.exec(line);
     const text = (match?.[2] ?? '').trim();
     if (match === null || text === '') {
       // A note with no date can't be placed in a week, so it isn't modelled —
       // but it is somebody's writing, so it is kept exactly as they left it.
       if (!isPlaceholder(line)) extra.push(line);
-      continue;
+      return;
     }
 
     if (firstItemAt === -1) firstItemAt = extra.length;
 
     notes.push({ date: match[1] ?? '', text });
-  }
+  });
 
   return { notes, extra, firstItemAt };
 }
@@ -182,7 +198,7 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
   const parsedNotes = parseNotes(owned.get(NOTES_HEADING) ?? []);
 
   return {
-    person: fields.person ?? fallback.person,
+    person: scalarField(fields.person) ?? fallback.person,
     tasks: parsedTasks.tasks,
     completedDates: parsedTasks.completedDates,
     notes: parsedNotes.notes,
@@ -210,7 +226,7 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
   const taskLines = member.tasks.map((task) => {
     const date = task.status === 'completed' ? member.completedDates[task.title] : undefined;
     const suffix = date === undefined ? '' : ` _(${date})_`;
-    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`);
+    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`, task.marker);
   });
   blocks.push(renderSection(TASKS_HEADING, taskLines, '_Nothing tracked yet._', preserved.tasks));
 
