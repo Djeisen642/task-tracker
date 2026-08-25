@@ -18,6 +18,15 @@ export interface Task {
   title: string;
   status: TaskStatus;
   /**
+   * The checkbox character this task was read from, when it isn't one of the
+   * three the app writes — `[-]`, `[>]`, and other tools' conventions.
+   *
+   * Carried so a write doesn't turn somebody's cancelled or deferred item into
+   * live work. Dropped as soon as the status changes, because at that point the
+   * app does know what the line means. See `renderTaskLine`.
+   */
+  marker?: string;
+  /**
    * The day this task first appeared, preserved as it carries forward.
    *
    * This is the one thing about a task that cannot be recovered by reading the

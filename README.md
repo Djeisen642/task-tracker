@@ -91,8 +91,17 @@ questions. Point Claude at the folder and ask:
 - "What has @alice been working on this quarter?"
 - "Help me draft my year-end review from these notes."
 
-Hand edits are preserved — sections and frontmatter keys the app doesn't own
-survive its writes untouched, so you and an agent can both write to a day file.
+Hand edits are preserved — sections, frontmatter keys (including Obsidian-style
+block lists), and any prose or subheading inside the sections the app does own
+survive its writes, so you and an agent can both write to a day file. The
+content is kept verbatim; what the app may change is where it sits, since it
+owns the order of the items it models.
+
+It also reads what you write rather than only what it writes: a bullet without a
+checkbox, a numbered list, an unfamiliar `[>]` marker and a lower-case
+`## tasks` heading are all read as tasks and show up in the app. Code fences,
+HTML comments and bullets nested under another task are left alone — they stay
+in the file exactly as written, and never become tasks.
 
 ![The day-start check-in](docs/screenshots/day-start.png)
 
@@ -310,7 +319,7 @@ runs format, lint, typecheck and tests; `pnpm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (501 unit tests plus 101 end-to-end
+Pre-v0.1. The web layer is built and tested (554 unit tests plus 106 end-to-end
 tests driving the real card in a browser), and the Rust layer compiles clean —
 `cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
 all pass.

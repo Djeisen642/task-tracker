@@ -39,9 +39,20 @@
  */
 
 import type { DateKey } from '../dates.ts';
-import type { Task, TaskStatus } from '../tasks.ts';
-import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
-import { splitSections, trimBlankEdges, type ExtraSection } from './sections.ts';
+import type { Task } from '../tasks.ts';
+import { parseFrontmatter, scalarField, serializeFrontmatter } from './frontmatter.ts';
+import { isNested, parseTaskLine, renderTaskLine } from './task-line.ts';
+import {
+  emptyPreserved,
+  isPlaceholder,
+  maskedLines,
+  splitPreserved,
+  renderSection,
+  splitOwnedSections,
+  trimBlankEdges,
+  type ExtraSection,
+  type PreservedLines,
+} from './sections.ts';
 
 /** A dated note about a report. `date` is the day it was logged, not a time. */
 export interface TeamNote {
@@ -65,26 +76,17 @@ export interface TeamMemberDocument {
   extraFields: Record<string, string>;
   /** Sections we don't own, kept in file order and re-emitted after Notes. */
   extraSections: ExtraSection[];
+  /**
+   * Lines inside the sections we *do* own that aren't items — a paragraph of
+   * context above the task list, a `###` subheading, a note written without a
+   * date. Kept verbatim and written back, because this file is the only copy.
+   */
+  preserved: PreservedLines;
 }
 
 const TASKS_HEADING = '## Tasks';
 const NOTES_HEADING = '## Notes';
 
-/** Checkbox marker ↔ status. Mirrors the day file's convention exactly. */
-const MARKER_TO_STATUS: Record<string, TaskStatus> = {
-  ' ': 'upcoming',
-  '/': 'in-progress',
-  x: 'completed',
-  X: 'completed',
-};
-
-const STATUS_TO_MARKER: Record<TaskStatus, string> = {
-  upcoming: ' ',
-  'in-progress': '/',
-  completed: 'x',
-};
-
-const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
 /** A trailing `_(2026-08-03)_` on a completed task line — see the module doc. */
 const COMPLETED_DATE_PATTERN = /\s*_\((\d{4}-\d{2}-\d{2})\)_\s*$/;
 /** `- 2026-08-10 — text`, accepting an em dash, en dash or hyphen as the separator. */
@@ -96,19 +98,32 @@ const OWNED_FIELDS = ['person'];
 function parseTasks(lines: readonly string[]): {
   tasks: Task[];
   completedDates: Record<string, DateKey>;
+  extra: string[];
+  firstItemAt: number;
 } {
   const tasks: Task[] = [];
   const completedDates: Record<string, DateKey> = {};
+  const extra: string[] = [];
+  let firstItemAt = -1;
+  // Inside a fence or an HTML comment, nothing is an item — see `maskedLines`.
+  const masked = maskedLines(lines);
+  // The indent of the first item sets the list's own level; anything deeper is
+  // a sub-item or a wrapped line, which this flat model cannot hold.
+  let baseIndent = -1;
 
-  for (const line of lines) {
-    const match = TASK_PATTERN.exec(line);
-    if (match === null) continue;
+  lines.forEach((line, index) => {
+    const item = masked[index] === true ? null : parseTaskLine(line);
+    if (item === null || (baseIndent !== -1 && isNested(item, baseIndent))) {
+      // Not an item: a paragraph, a `###` subheading, a table. Keep it.
+      if (!isPlaceholder(line)) extra.push(line);
+      return;
+    }
 
-    const status = MARKER_TO_STATUS[match[1] ?? ''];
-    let title = (match[2] ?? '').trim();
-    // An unknown marker means someone is using a convention we don't model;
-    // skipping keeps the line intact on the next write rather than guessing.
-    if (status === undefined || title === '') continue;
+    if (firstItemAt === -1) firstItemAt = extra.length;
+    if (baseIndent === -1) baseIndent = item.indent;
+
+    const status = item.status;
+    let title = item.text;
 
     if (status === 'completed') {
       const dateMatch = COMPLETED_DATE_PATTERN.exec(title);
@@ -119,28 +134,47 @@ function parseTasks(lines: readonly string[]): {
       }
     }
 
-    if (title === '') continue;
-    tasks.push({ title, status });
-  }
+    // A line whose whole title was a completion stamp (`- [x] _(2026-08-03)_`)
+    // is not a task, and must not simply vanish — it takes the preserved path
+    // like any other line the format doesn't model.
+    if (title === '') {
+      extra.push(line);
+      if (firstItemAt === extra.length - 1) firstItemAt = -1;
+      return;
+    }
 
-  return { tasks, completedDates };
+    tasks.push({ title, status, ...(item.marker === undefined ? {} : { marker: item.marker }) });
+  });
+
+  return { tasks, completedDates, extra, firstItemAt };
 }
 
-function parseNotes(lines: readonly string[]): TeamNote[] {
+function parseNotes(lines: readonly string[]): {
+  notes: TeamNote[];
+  extra: string[];
+  firstItemAt: number;
+} {
   const notes: TeamNote[] = [];
+  const extra: string[] = [];
+  let firstItemAt = -1;
+  const masked = maskedLines(lines);
 
-  for (const line of lines) {
-    const match = NOTE_PATTERN.exec(line);
-    if (match === null) continue;
+  lines.forEach((line, index) => {
+    const match = masked[index] === true ? null : NOTE_PATTERN.exec(line);
+    const text = (match?.[2] ?? '').trim();
+    if (match === null || text === '') {
+      // A note with no date can't be placed in a week, so it isn't modelled —
+      // but it is somebody's writing, so it is kept exactly as they left it.
+      if (!isPlaceholder(line)) extra.push(line);
+      return;
+    }
 
-    const date = match[1] ?? '';
-    const text = (match[2] ?? '').trim();
-    if (text === '') continue;
+    if (firstItemAt === -1) firstItemAt = extra.length;
 
-    notes.push({ date, text });
-  }
+    notes.push({ date: match[1] ?? '', text });
+  });
 
-  return notes;
+  return { notes, extra, firstItemAt };
 }
 
 /**
@@ -150,35 +184,31 @@ function parseNotes(lines: readonly string[]): TeamNote[] {
  */
 export function parseTeamMember(source: string, fallback: { person: string }): TeamMemberDocument {
   const { fields, body } = parseFrontmatter(source);
-  const { sections } = splitSections(body);
+  const { owned, preamble, extraSections } = splitOwnedSections(body, [
+    TASKS_HEADING,
+    NOTES_HEADING,
+  ]);
 
   const extraFields: Record<string, string> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (!OWNED_FIELDS.includes(key)) extraFields[key] = value;
   }
 
-  let tasks: Task[] = [];
-  let completedDates: Record<string, DateKey> = {};
-  let notes: TeamNote[] = [];
-  const extraSections: ExtraSection[] = [];
-
-  for (const section of sections) {
-    if (section.heading === TASKS_HEADING) {
-      ({ tasks, completedDates } = parseTasks(section.lines));
-    } else if (section.heading === NOTES_HEADING) {
-      notes = parseNotes(section.lines);
-    } else {
-      extraSections.push({ heading: section.heading, lines: [...section.lines] });
-    }
-  }
+  const parsedTasks = parseTasks(owned.get(TASKS_HEADING) ?? []);
+  const parsedNotes = parseNotes(owned.get(NOTES_HEADING) ?? []);
 
   return {
-    person: fields.person ?? fallback.person,
-    tasks,
-    completedDates,
-    notes,
+    person: scalarField(fields.person) ?? fallback.person,
+    tasks: parsedTasks.tasks,
+    completedDates: parsedTasks.completedDates,
+    notes: parsedNotes.notes,
     extraFields,
     extraSections,
+    preserved: {
+      preamble,
+      tasks: splitPreserved(parsedTasks.extra, parsedTasks.firstItemAt),
+      notes: splitPreserved(parsedNotes.extra, parsedNotes.firstItemAt),
+    },
   };
 }
 
@@ -189,25 +219,21 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
     ...member.extraFields,
   };
 
+  const preserved = member.preserved;
   const blocks: string[] = [`# @${member.person}`];
+  if (preserved.preamble.length > 0) blocks.push(trimBlankEdges(preserved.preamble).join('\n'));
 
   const taskLines = member.tasks.map((task) => {
     const date = task.status === 'completed' ? member.completedDates[task.title] : undefined;
     const suffix = date === undefined ? '' : ` _(${date})_`;
-    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
+    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`, task.marker);
   });
-  blocks.push(
-    [TASKS_HEADING, '', ...(taskLines.length > 0 ? taskLines : ['_Nothing tracked yet._'])].join(
-      '\n',
-    ),
-  );
+  blocks.push(renderSection(TASKS_HEADING, taskLines, '_Nothing tracked yet._', preserved.tasks));
 
   const noteLines = [...member.notes]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((note) => `- ${note.date} — ${note.text.trim()}`);
-  blocks.push(
-    [NOTES_HEADING, '', ...(noteLines.length > 0 ? noteLines : ['_No notes yet._'])].join('\n'),
-  );
+  blocks.push(renderSection(NOTES_HEADING, noteLines, '_No notes yet._', preserved.notes));
 
   for (const section of member.extraSections) {
     blocks.push([section.heading, '', ...trimBlankEdges(section.lines)].join('\n'));
@@ -218,7 +244,15 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
 
 /** A fresh, empty team document for `person`. */
 export function createTeamMember(person: string): TeamMemberDocument {
-  return { person, tasks: [], completedDates: {}, notes: [], extraFields: {}, extraSections: [] };
+  return {
+    person,
+    tasks: [],
+    completedDates: {},
+    notes: [],
+    extraFields: {},
+    extraSections: [],
+    preserved: emptyPreserved(),
+  };
 }
 
 /**

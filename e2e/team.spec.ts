@@ -434,3 +434,122 @@ test('surfaces kudos and blockers in the team rollup, not duplicated under Notes
   expect(notesSection).not.toContain('#blocker');
   expect(notesSection).toContain('A routine update');
 });
+
+test('shows work written into a report file by hand', async ({ page }) => {
+  // The shapes a human or an agent actually writes: no checkbox, a marker we
+  // don't model, a numbered list, a lower-case heading. Every one of these used
+  // to be invisible in the panel — and deleted by the app's next write.
+  await startApp(page, {
+    files: {
+      'team.greg.md': [
+        '---',
+        'person: greg',
+        '---',
+        '',
+        '# @greg',
+        '',
+        'Joined in June. Prefers written feedback.',
+        '',
+        '## tasks',
+        '',
+        '- Take over the migration',
+        '- [>] Pair with @alice on the RFC',
+        '1. Write the postmortem',
+        '- [x] Reviewed the design doc _(2026-07-31)_',
+        '',
+        '## Notes',
+        '',
+        '- 2026-07-30 — Picked up the queue work',
+        '- Undated thought about the reorg',
+        '',
+      ].join('\n'),
+    },
+  });
+
+  await openTeam(page);
+  await page.fill('#team-person-input', 'greg');
+  await page.press('#team-person-input', 'Enter');
+
+  await expect(page.locator('#team-task-list .task-title')).toHaveText([
+    'Take over the migration',
+    'Pair with @alice on the RFC',
+    'Write the postmortem',
+    'Reviewed the design doc',
+  ]);
+
+  // And logging something new must not eat the rest of the file.
+  await page.fill('#team-note-input', 'Handing over the on-call rota');
+  await page.press('#team-note-input', 'Enter');
+
+  const written = await readVaultFile(page, 'team.greg.md');
+  expect(written).toContain('- [ ] Take over the migration');
+  // The `[>]` marker is kept, not coerced to `[ ]`: it means something to
+  // whoever wrote it, and rewriting it makes a parked item live work again.
+  expect(written).toContain('- [>] Pair with @alice on the RFC');
+  expect(written).toContain('- [ ] Write the postmortem');
+  expect(written).toContain('- [x] Reviewed the design doc _(2026-07-31)_');
+  expect(written).toContain('Joined in June. Prefers written feedback.');
+  expect(written).toContain('- Undated thought about the reorg');
+  expect(written).toContain('Handing over the on-call rota');
+});
+
+test('keeps a report file readable after the app rewrites it', async ({ page }) => {
+  await startApp(page, {
+    files: {
+      'team.greg.md': ['---', 'person: greg', '---', '', '# @greg', '', '- Ship it', ''].join('\n'),
+    },
+  });
+
+  await openTeam(page);
+  await page.fill('#team-person-input', 'greg');
+  await page.press('#team-person-input', 'Enter');
+
+  // A bullet with no section at all is above the first heading, so it is
+  // preamble: kept verbatim rather than promoted to a task it may not be.
+  await expect(page.locator('#team-task-list .task')).toHaveCount(0);
+
+  await page.fill('#team-task-input', 'Something new');
+  await page.press('#team-task-input', 'Enter');
+
+  const written = await readVaultFile(page, 'team.greg.md');
+  expect(written).toContain('- Ship it');
+  expect(written).toContain('- [ ] Something new');
+});
+
+test('ticks one of two near-identical lines, not both', async ({ page }) => {
+  // A hand-edited file can hold two titles that differ only in case. They are
+  // two lines and two rows; clicking one used to flip both, because the model
+  // looked tasks up by title.
+  await startApp(page, {
+    files: {
+      'team.greg.md': [
+        '---',
+        'person: greg',
+        '---',
+        '',
+        '# @greg',
+        '',
+        '## Tasks',
+        '',
+        '- [ ] Ship it',
+        '- [ ] ship it',
+        '',
+      ].join('\n'),
+    },
+  });
+
+  await openTeam(page);
+  await page.fill('#team-person-input', 'greg');
+  await page.press('#team-person-input', 'Enter');
+
+  const rows = page.locator('#team-task-list .task');
+  await expect(rows).toHaveCount(2);
+  await rows.nth(1).locator('.task-toggle').click();
+
+  await expect(rows.nth(0)).not.toHaveClass(/is-in-progress|is-completed/);
+  await expect(rows.nth(1)).toHaveClass(/is-in-progress/);
+
+  const written = await readVaultFile(page, 'team.greg.md');
+  expect(written).toContain('- [ ] Ship it');
+  expect(written).toContain('- [/] ship it');
+});

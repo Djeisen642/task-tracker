@@ -95,6 +95,34 @@ fidelity are the whole roadmap now:
 
 ## Fidelity: what the file can prove
 
+- **Preserve _where_ unmodelled lines sat, not just that they existed.** Prose
+  is kept in two buckets — what led the item list and what followed it — which
+  is right for a subheading above the tasks and wrong for anything written
+  between two items. A second `### Afternoon` heading is dragged below the list,
+  so its tasks read as filed under `### Morning`; a paragraph that says
+  "everything below is blocked" ends up with nothing below it. The fix is to
+  anchor each preserved run to the item it followed rather than to the ends of
+  the section, which survives the app reordering its own items. Deferred with
+  the surgical write below, since both are the same underlying problem: the app
+  re-emits a section instead of editing it.
+- **Write surgically instead of re-emitting the file.** Every save parses the
+  file into a model and writes the whole thing back out, so anything the model
+  doesn't represent survives only because something explicitly preserves it.
+  Three holes were found and closed that way (prose above the first heading,
+  `###` subheadings, non-item lines inside an owned section), and the shape of
+  the bug guarantees there are more: the _next_ unmodelled thing someone writes
+  is at risk by default. The structural fix is to rewrite only the lines that
+  changed and leave the rest byte-identical, which makes preservation the
+  default rather than a list of patches. Deferred because it replaces the whole
+  serializer and its failure mode — a bad patch to the only copy of a day's
+  notes — is worse than what it fixes, but it is the right end state.
+- **A completed team task's date is keyed by its title.** `completedDates` is a
+  `Record<title, date>`, so two tasks a human would call the same thing share
+  one entry, and renaming a completed task by hand drops the date — and with it
+  that task's week in the rollup. Mutations are identified by reference now
+  (see `setTaskStatus`), and the fix here is the same idea one level down: move
+  the date onto the task, where the line it came from can keep it.
+
 - **Task provenance.** _(done — see above the line.)_ A task carries the day it
   first appeared once it outlives that day, so a single line yields start,
   finish and duration. This was the one fact in the vault that could not be

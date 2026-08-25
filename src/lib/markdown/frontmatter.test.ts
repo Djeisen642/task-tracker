@@ -64,3 +64,40 @@ describe('serializeFrontmatter', () => {
     expect(parseFrontmatter(serializeFrontmatter(fields)).fields).toEqual(fields);
   });
 });
+
+describe('shapes other editors write', () => {
+  it('keeps a block-style list rather than deleting its items', () => {
+    // Obsidian's property editor writes exactly this. The items carry no key of
+    // their own, and skipping them left a bare `tags:` with the values gone.
+    const source = [
+      '---',
+      'date: 2026-08-03',
+      'tags:',
+      '  - work',
+      '  - migration',
+      '---',
+      '',
+    ].join('\n');
+    const { fields } = parseFrontmatter(source);
+
+    const written = serializeFrontmatter(fields);
+    expect(written).toContain('  - work');
+    expect(written).toContain('  - migration');
+    expect(parseFrontmatter(written).fields).toEqual(fields);
+  });
+
+  it('keeps a wrapped value with the key that introduced it', () => {
+    const source = ['---', 'note: a long value', '  continued here', '---', ''].join('\n');
+    expect(serializeFrontmatter(parseFrontmatter(source).fields)).toContain('  continued here');
+  });
+
+  it('reads a quoted scalar as the value it names', () => {
+    // `date: "2026-08-03"` read literally becomes a filename with quotes in it.
+    expect(parseFrontmatter('---\ndate: "2026-08-03"\n---\n').fields.date).toBe('2026-08-03');
+    expect(parseFrontmatter("---\ndate: '2026-08-03'\n---\n").fields.date).toBe('2026-08-03');
+  });
+
+  it('leaves an unbalanced quote alone', () => {
+    expect(parseFrontmatter('---\nnote: "unfinished\n---\n').fields.note).toBe('"unfinished');
+  });
+});

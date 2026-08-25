@@ -57,9 +57,175 @@ describe('parseTeamMember', () => {
     expect(member.notes.map((note) => note.text)).toEqual(['en dash', 'hyphen']);
   });
 
-  it('skips an unknown task marker rather than guessing at its meaning', () => {
+  it('reads an unknown task marker as upcoming rather than dropping the line', () => {
+    // This used to be "skip it rather than guess", on the theory that skipping
+    // left the line intact. It did not: the next write re-emitted the section
+    // from the parsed tasks only, so the line was deleted from the file — and
+    // in the app it was simply never there.
     const member = parseTeamMember('## Tasks\n\n- [?] Mystery\n- [ ] Real\n', FALLBACK);
-    expect(member.tasks).toEqual([{ title: 'Real', status: 'upcoming' }]);
+
+    expect(member.tasks).toEqual([
+      { title: 'Mystery', status: 'upcoming', marker: '?' },
+      { title: 'Real', status: 'upcoming' },
+    ]);
+    // Visible in the app, and still `[?]` on disk — see `renderTaskLine`.
+    expect(serializeTeamMember(member)).toContain('- [?] Mystery');
+  });
+
+  it('reads a bullet with no checkbox as a task', () => {
+    const member = parseTeamMember('## Tasks\n\n- Ship the migration\n', FALLBACK);
+    expect(member.tasks).toEqual([{ title: 'Ship the migration', status: 'upcoming' }]);
+  });
+
+  it('reads a numbered list as tasks', () => {
+    const member = parseTeamMember('## Tasks\n\n1. [ ] First\n2) Second\n', FALLBACK);
+    expect(member.tasks.map((task) => task.title)).toEqual(['First', 'Second']);
+  });
+
+  it('reads a lower-case section heading', () => {
+    const member = parseTeamMember('## tasks\n\n- [ ] Ship it\n', FALLBACK);
+
+    expect(member.tasks).toEqual([{ title: 'Ship it', status: 'upcoming' }]);
+    expect(member.extraSections).toEqual([]);
+  });
+
+  it('keeps a second section of the same name rather than replacing the first', () => {
+    const member = parseTeamMember(
+      '## Tasks\n\n- [ ] First\n\n## Tasks\n\n- [ ] Second\n',
+      FALLBACK,
+    );
+
+    expect(member.tasks).toEqual([{ title: 'First', status: 'upcoming' }]);
+    expect(member.extraSections).toEqual([
+      { heading: '## Tasks', lines: ['', '- [ ] Second', ''] },
+    ]);
+    expect(serializeTeamMember(member)).toContain('- [ ] Second');
+  });
+
+  it('keeps the paragraph break between two preserved paragraphs', () => {
+    // The blank line *is* the paragraph break in Markdown. Dropping it as
+    // "layout" silently merged two paragraphs of somebody's writing into one.
+    const source = '---\nperson: alice\n---\n\n# @alice\n\n## Tasks\n\nPara one.\n\nPara two.\n';
+    const written = serializeTeamMember(parseTeamMember(source, FALLBACK));
+
+    expect(written).toContain('Para one.\n\nPara two.');
+    expect(serializeTeamMember(parseTeamMember(written, FALLBACK))).toBe(written);
+  });
+
+  it("keeps a line that merely resembles a rollup's generated placeholder", () => {
+    // Only the placeholders *this* format writes are the app's own output. A
+    // weekly rollup's wording is not, and deleting someone's line for looking
+    // like generated text is the bug this file is fixing, not an exception.
+    const source =
+      '---\nperson: alice\n---\n\n# @alice\n\n## Notes\n\n_No kudos recorded this week._\n';
+
+    expect(serializeTeamMember(parseTeamMember(source, FALLBACK))).toContain(
+      '_No kudos recorded this week._',
+    );
+  });
+
+  it('drops its own empty-section placeholder rather than preserving it', () => {
+    const source = '---\nperson: alice\n---\n\n# @alice\n\n## Tasks\n\n_Nothing tracked yet._\n';
+    const member = parseTeamMember(source, FALLBACK);
+
+    expect(member.preserved.tasks).toEqual({ lead: [], trail: [] });
+    // And it comes back exactly once, because the section is still empty.
+    expect(serializeTeamMember(member).match(/_Nothing tracked yet\._/g)).toHaveLength(1);
+  });
+
+  it('leaves a nested bullet nested instead of promoting it to a task', () => {
+    // There is no sub-task in this model. Parsing the indented line made it a
+    // peer of its parent and dropped the indentation from the file, destroying
+    // a hierarchy the vault cannot re-express; preserving it keeps the file.
+    const member = parseTeamMember('## Tasks\n\n- [ ] Parent\n  - detail\n', FALLBACK);
+
+    expect(member.tasks.map((task) => task.title)).toEqual(['Parent']);
+    expect(serializeTeamMember(member)).toContain('  - detail');
+  });
+
+  it('still reads a list that is wholly indented', () => {
+    // Indentation is judged against the first item, not against zero.
+    const member = parseTeamMember('## Tasks\n\n  - [ ] One\n  - [ ] Two\n', FALLBACK);
+
+    expect(member.tasks.map((task) => task.title)).toEqual(['One', 'Two']);
+  });
+
+  it('keeps a subheading above the list it introduces', () => {
+    // Position is not fully recoverable, but leading and trailing are: a
+    // `### This quarter` re-emitted *below* the tasks it labels reads as a bug
+    // even though nothing was lost.
+    const source = [
+      '---',
+      'person: alice',
+      '---',
+      '',
+      '# @alice',
+      '',
+      '## Tasks',
+      '',
+      '### This quarter',
+      '',
+      '- [ ] Ship the migration',
+      '',
+      'Chased legal on Tuesday.',
+      '',
+    ].join('\n');
+
+    const written = serializeTeamMember(parseTeamMember(source, FALLBACK));
+    const tasks = written.split('## Tasks')[1]?.split('## Notes')[0] ?? '';
+
+    expect(tasks.trim().split('\n').filter(Boolean)).toEqual([
+      '### This quarter',
+      '- [ ] Ship the migration',
+      'Chased legal on Tuesday.',
+    ]);
+    expect(serializeTeamMember(parseTeamMember(written, FALLBACK))).toBe(written);
+  });
+
+  it('keeps prose in a section with no items at all', () => {
+    const source =
+      '---\nperson: alice\n---\n\n# @alice\n\n## Tasks\n\nNothing assigned yet, see the doc.\n';
+    const member = parseTeamMember(source, FALLBACK);
+
+    expect(member.preserved.tasks).toEqual({
+      lead: ['Nothing assigned yet, see the doc.'],
+      trail: [],
+    });
+    expect(serializeTeamMember(member)).toContain('Nothing assigned yet, see the doc.');
+  });
+
+  it('preserves prose inside the sections it owns', () => {
+    const source = [
+      '---',
+      'person: alice',
+      '---',
+      '',
+      '# @alice',
+      '',
+      'Joined the team in June. Prefers written feedback.',
+      '',
+      '## Tasks',
+      '',
+      '### This quarter',
+      '',
+      '- [ ] Ship the migration',
+      '',
+      '## Notes',
+      '',
+      '- Undated thought about the reorg',
+      '',
+    ].join('\n');
+
+    const member = parseTeamMember(source, FALLBACK);
+    expect(member.tasks).toEqual([{ title: 'Ship the migration', status: 'upcoming' }]);
+
+    const written = serializeTeamMember(member);
+    expect(written).toContain('Joined the team in June. Prefers written feedback.');
+    expect(written).toContain('### This quarter');
+    expect(written).toContain('- Undated thought about the reorg');
+
+    // And it stays put: a second write neither loses it nor duplicates it.
+    expect(serializeTeamMember(parseTeamMember(written, FALLBACK))).toBe(written);
   });
 
   it('falls back for a file with no frontmatter', () => {
@@ -173,7 +339,9 @@ describe('serializeTeamMember', () => {
 
   it('falls back to the raw key when the person is somehow unset', () => {
     const member: TeamMemberDocument = { ...createTeamMember('alice'), person: '' };
-    expect(serializeTeamMember(member)).toContain('person: \n');
+    // Written without a trailing space — an empty value is `person:`, which is
+    // what every editor and formatter would leave behind anyway.
+    expect(serializeTeamMember(member)).toContain('person:\n');
   });
 });
 
@@ -205,6 +373,11 @@ describe('createTeamMember', () => {
       notes: [],
       extraFields: {},
       extraSections: [],
+      preserved: {
+        preamble: [],
+        tasks: { lead: [], trail: [] },
+        notes: { lead: [], trail: [] },
+      },
     });
   });
 });
