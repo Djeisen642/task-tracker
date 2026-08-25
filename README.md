@@ -309,6 +309,73 @@ Nothing here is code-signed or notarized, and each OS says so in its own way:
 Signing both desktop platforms — and the auto-update channel that wants the same
 keys — is on the list in [`docs/future-work.md`](docs/future-work.md).
 
+## Versioning
+
+The version number is derived from the commits, not typed by hand.
+
+Four files carry it — `package.json`, `src-tauri/tauri.conf.json`,
+`src-tauri/Cargo.toml`, and the crate's own entry in `src-tauri/Cargo.lock` —
+and nothing used to fail when they disagreed. A Tauri installer takes its
+version from `tauri.conf.json`, so the number a user sees in Add/Remove Programs
+came from a different file than the one anybody remembered to edit.
+
+### Commit subjects
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org), and
+the `commit-msg` hook installed by `pnpm install` enforces it:
+
+```
+feat(schedule): upgrade the first slot of the day to a day-start
+fix: keep a subheading above the list it labels
+chore: update five dev dependencies
+```
+
+| Subject                             | Effect                    |
+| ----------------------------------- | ------------------------- |
+| `feat: …`                           | minor — `0.3.1` → `0.4.0` |
+| `fix: …` / `perf: …`                | patch — `0.3.1` → `0.3.2` |
+| `feat!: …`, or a `BREAKING CHANGE:` | major (but see below)     |
+| anything else                       | no release on its own     |
+
+The other types — `build`, `chore`, `ci`, `docs`, `refactor`, `revert`, `style`,
+`test` — describe the change without claiming to be one worth shipping. A week
+of dependency bumps and README fixes produces no version, which is the point:
+releases nobody can tell apart are worse than no releases.
+
+**Below 1.0.0, a breaking change bumps the minor** (`0.1.0` → `0.2.0`) rather
+than declaring `1.0.0`. Reaching 1.0 is a statement about the app being finished
+enough to promise compatibility — a decision for a person, not something that
+should fall out of a `!` in a commit subject.
+
+Merge, revert and `fixup!` subjects are exempt: git wrote them, and the work
+they carry is already in the log.
+
+### What happens on merge
+
+`.github/workflows/release.yml` runs **after CI passes on `main`**, so a tag
+always points at a commit that survived lint, tests, the build and the Rust
+gate. It reads the commits since the last `v*` tag, and if any of them earn a
+bump it writes the new number into all four files, commits `Release vX.Y.Z`,
+tags it, and publishes a GitHub release whose notes are grouped by consequence —
+breaking changes first, then features, then fixes.
+
+That push is authenticated with `GITHUB_TOKEN`, which by design does not trigger
+further workflow runs, so the release commit cannot start a second release. It
+does mean `main` must accept a push from `github-actions[bot]`: a branch
+protection rule without an exception for it will block the tag.
+
+### By hand
+
+```bash
+pnpm run version:check       # do the four files agree? (also part of `pnpm run check`)
+pnpm run version:next        # what would the next version be, and why
+pnpm run version:notes       # the release notes for it
+pnpm run version:sync 0.2.0  # write a number into all four files
+```
+
+`version:check` runs in `pnpm run check`, so drift fails the same gate
+everything else does rather than surfacing at bundle time.
+
 ## Stack
 
 Tauri v2, vanilla TypeScript, Vite. No UI framework, on purpose — the app runs

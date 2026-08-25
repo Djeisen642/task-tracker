@@ -279,7 +279,9 @@ agent doesn't attempt the within-file comparison that cannot work.
   light/dark bar. Decide that with a real menu bar in front of you, not from
   the docs.
 - A CI job that actually builds the three installers, so a packaging change
-  fails before it lands instead of on the next manual build.
+  fails before it lands instead of on the next manual build. The release
+  workflow tags a version but attaches no binaries, for exactly this reason —
+  there is nothing building them to attach.
 - Coverage thresholds in CI.
 
 ---

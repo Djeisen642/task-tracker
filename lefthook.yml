@@ -26,6 +26,11 @@ pre-commit:
 
 commit-msg:
   commands:
-    # Placeholder for a future commit-lint integration.
-    noop:
-      run: 'true'
+    # The version number is derived from these subjects (scripts/version.ts), so
+    # a subject that doesn't say what kind of change it makes is a release the
+    # tooling silently classifies as nothing. Merge, revert and fixup subjects
+    # are exempt — see `isExemptSubject`.
+    conventional-commit:
+      run: >-
+        node --disable-warning=ExperimentalWarning --experimental-strip-types
+        scripts/commit-msg.ts {1}

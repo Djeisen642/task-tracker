@@ -112,6 +112,8 @@ e2e/
   expand.spec.ts        # The card's expand toggle
   capture.spec.ts       # Screenshots into docs/screenshots/
 scripts/
+  version.ts(.test)              # The version, derived from the commit subjects
+  commit-msg.ts                  # The hook that holds a subject to that grammar
   backfill-provenance.ts(.test)  # One-shot: reconstruct task `added` dates in a
                                  # pre-v2 vault. NOT app code — see below.
 docs/
@@ -310,6 +312,25 @@ docs/
   version newer than this build understands. Version 1 is the _absence_ of the
   key; never write `format: 1`. Bump the constant when the meaning of existing
   syntax changes, not when something is merely added.
+- **The version is derived from the commit subjects, and lives in four files at
+  once.** `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
+  and the crate's entry in `src-tauri/Cargo.lock` all carry it, and nothing
+  failed when they disagreed — a Tauri installer reads `tauri.conf.json`, so the
+  number in Add/Remove Programs came from a different file than the one anybody
+  edited. `scripts/version.ts` is the single writer: it rewrites the _text_ of
+  each file rather than re-serializing it (a JSON round-trip that silently drops
+  a key from `tauri.conf.json` is a configuration bug with no error message),
+  throws unless it finds exactly one place to write, and `pnpm run version:check`
+  is part of `pnpm run check` so drift fails the same gate as everything else.
+  Anything that adds a fifth home for the version adds an entry to `FILES` too.
+- **`feat`/`fix`/`perf` move the number; nothing else does.** The `commit-msg`
+  hook enforces the Conventional Commits grammar because the version now depends
+  on it, and the failure mode without it is silent — the commit lands and the
+  version simply doesn't move. A week of `chore:` and `docs:` releases nothing on
+  purpose. Below 1.0.0 a breaking change bumps the _minor_: declaring 1.0 is a
+  statement that the app is finished enough to promise compatibility, which is a
+  person's decision and not something to fall out of a `!` in a subject line.
+  Merge, revert and `fixup!` subjects are exempt — git wrote them.
 - **A vault migration is a script, not a startup path.** `scripts/` is outside
   the app for a reason: the app touches one file at a time and has no evidence
   about what preceded it, whereas a migration reads the whole vault, derives
@@ -436,15 +457,18 @@ per package under `allowBuilds` so the expected skips are silent and a genuinely
 new one stands out. `pnpm approve-builds <pkg>` / `'!<pkg>'` writes that file for
 you, which beats guessing the key by hand.
 
-| Command                 | Purpose                                         |
-| ----------------------- | ----------------------------------------------- |
-| `pnpm install`          | Install deps + git hooks (`prepare` → lefthook) |
-| `pnpm run dev`          | Browser-only preview of the card (no Rust)      |
-| `pnpm run tauri dev`    | Full desktop app (needs Rust + Tauri prereqs)   |
-| `pnpm run check`        | format + lint + typecheck + test (the web gate) |
-| `pnpm run build`        | `tsc --noEmit` + `vite build`                   |
-| `pnpm run test:watch`   | Vitest in watch mode                            |
-| `pnpm run tauri icon X` | Regenerate the platform icon set from `X.png`   |
+| Command                  | Purpose                                         |
+| ------------------------ | ----------------------------------------------- |
+| `pnpm install`           | Install deps + git hooks (`prepare` → lefthook) |
+| `pnpm run dev`           | Browser-only preview of the card (no Rust)      |
+| `pnpm run tauri dev`     | Full desktop app (needs Rust + Tauri prereqs)   |
+| `pnpm run check`         | format + lint + typecheck + test (the web gate) |
+| `pnpm run build`         | `tsc --noEmit` + `vite build`                   |
+| `pnpm run test:watch`    | Vitest in watch mode                            |
+| `pnpm run tauri icon X`  | Regenerate the platform icon set from `X.png`   |
+| `pnpm run version:check` | Do the four files carrying the version agree?   |
+| `pnpm run version:next`  | The version the commits since the last tag earn |
+| `pnpm run version:sync`  | Write a version into all four of those files    |
 
 Run a one-shot script with Node's own type stripping — there is no bundler step
 for `scripts/`, and no `tsx` dependency:
