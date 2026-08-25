@@ -356,3 +356,64 @@ test('does not re-arm a control the mouse clicked', async ({ page }) => {
   await expect(task).toHaveClass(/is-in-progress/);
   expect(await readVaultFile(page, '2026-08-03.md')).toContain('- [/] Ship the rollback');
 });
+
+test('stars one of two near-identical lines, not both', async ({ page }) => {
+  // `sameTask` treats these as one task, which is right for "don't add this
+  // twice" and wrong for "which row did the user click". Starring by title hit
+  // both rows — and because both then took the same next rank, one click
+  // consumed two of the five slots.
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 14, 20),
+    files: {
+      '2026-08-03.md': dayFile(
+        '2026-08-03',
+        [
+          { title: 'Ship it', marker: ' ' },
+          { title: 'ship it', marker: ' ' },
+        ],
+        { lastCheckIn: '13:00' },
+      ),
+    },
+  });
+
+  const rows = page.locator('.task');
+  await expect(rows).toHaveCount(2);
+  await rows.nth(1).locator('.task-priority').click();
+
+  await expect(page.locator('.task.is-priority')).toHaveCount(1);
+  await expect(page.locator('.task-rank')).toHaveText(['1']);
+
+  await page.click('#done');
+  const file = await readVaultFile(page, '2026-08-03.md');
+  expect(file).toContain('- [ ] ship it _(priority 1)_');
+  expect(file).toContain('- [ ] Ship it\n');
+});
+
+test('moves the row it was handed, through a hand-edited sparse ranking', async ({ page }) => {
+  // Every rank changes when a sparse file is normalized, so a lookup made
+  // after normalizing would be holding stale objects and quietly do nothing.
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 14, 20),
+    files: {
+      '2026-08-03.md': dayFile(
+        '2026-08-03',
+        [
+          { title: 'First', marker: ' ', priority: 2 },
+          { title: 'Second', marker: ' ', priority: 5 },
+          { title: 'Third', marker: ' ', priority: 9 },
+        ],
+        { lastCheckIn: '13:00' },
+      ),
+    },
+  });
+
+  await expect(page.locator('.task.is-priority .task-rank')).toHaveText(['1', '2', '3']);
+
+  await page.locator('.task', { hasText: 'Third' }).locator('[data-control="move-up"]').click();
+
+  await expect(page.locator('.task.is-priority .task-title')).toHaveText([
+    'First',
+    'Third',
+    'Second',
+  ]);
+});

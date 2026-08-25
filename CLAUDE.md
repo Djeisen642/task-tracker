@@ -164,6 +164,16 @@ docs/
   why it returns `null` for an empty week rather than a body of "Nothing" bullets
   — those read as authoritative and say nothing. Don't collapse it into
   `weeklyRollup`, whose output lands _in_ the folder next to the guide.
+- **A task is identified by reference, not by its title.** `sameTask` ignores
+  case and surrounding whitespace, which is right for "don't add this twice"
+  and wrong for "which row did the user just click" — a hand-edited file holding
+  `- Ship it` and `- [ ] ship it` is two lines and two rows. Every mutator takes
+  the `Task` object: `setTaskStatus`, `removeTask`, `togglePriority` and
+  `movePriority`. The last one needs care — it normalizes first, and
+  `normalizePriorities` returns a _new_ object for every rank it changes, so the
+  caller's reference is stale by then. It resolves `tasks.indexOf(target)`
+  against the array it was handed, before normalizing; the index survives
+  because normalize is a `map`.
 - **Ranking is optional, and the ranks are dense over the _open_ tasks.**
   `normalizePriorities` in `tasks.ts` is the whole feature: it renumbers to
   `1…n`, strips the rank from anything completed, and drops anything past
