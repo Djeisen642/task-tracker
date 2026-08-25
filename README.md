@@ -135,8 +135,12 @@ bundle, so they have to be there before Rust will even compile:
 sudo apt-get update && sudo apt-get install -y \
   libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
   librsvg2-dev libsoup-3.0-dev libxdo-dev libssl-dev libdbus-1-dev \
-  build-essential pkg-config file curl wget
+  build-essential pkg-config file curl wget xdg-utils
 ```
+
+`xdg-utils` is only needed to _bundle_ an AppImage — the bundler copies
+`/usr/bin/xdg-open` into the image — but it fails at the very end, after the
+release compile, so it is easier to install up front than to discover.
 
 Windows and macOS need no equivalent: WebView2 ships with Windows 11, and the
 macOS webview is WebKit. macOS additionally needs the Xcode command line tools

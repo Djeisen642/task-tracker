@@ -59,6 +59,11 @@ jobs:
       # WebKitGTK is the webview on Linux, and libayatana-appindicator is what
       # puts the tray icon in the panel. Both are build-time requirements here
       # and runtime requirements on the user's machine (the .deb declares them).
+      #
+      # xdg-utils is not optional either, though nothing says so until the very
+      # end: the AppImage bundler copies /usr/bin/xdg-open into the image and
+      # aborts the whole build if it is missing — after the release compile has
+      # already been paid for.
       - name: Install Tauri system dependencies
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -74,7 +79,8 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libdbus-1-dev \
-            pkg-config
+            pkg-config \
+            xdg-utils
 
       # The runner's default toolchain only carries its own architecture; a
       # universal binary needs both halves.
