@@ -57,9 +57,67 @@ describe('parseDay', () => {
     expect(day.tasks).toEqual([{ title: 'Starred', status: 'upcoming', added: '2026-08-02' }]);
   });
 
-  it('skips an unknown marker rather than guessing at its meaning', () => {
+  it('reads an unknown marker as upcoming rather than dropping the line', () => {
+    // This used to skip the line "rather than guessing", on the theory that
+    // skipping left it intact. It did not: the next write re-emits the section
+    // from the parsed tasks, so the line was deleted from the only copy.
     const day = parseDay('## Tasks\n\n- [?] Mystery\n- [ ] Real\n', FALLBACK);
-    expect(day.tasks).toEqual([{ title: 'Real', status: 'upcoming', added: '2026-08-02' }]);
+
+    expect(day.tasks).toEqual([
+      { title: 'Mystery', status: 'upcoming', added: '2026-08-02' },
+      { title: 'Real', status: 'upcoming', added: '2026-08-02' },
+    ]);
+  });
+
+  it('reads a bullet with no checkbox as a task', () => {
+    const day = parseDay('## Tasks\n\n- Ship the migration\n', FALLBACK);
+
+    expect(day.tasks).toEqual([
+      { title: 'Ship the migration', status: 'upcoming', added: '2026-08-02' },
+    ]);
+  });
+
+  it('reads a lower-case section heading', () => {
+    const day = parseDay('## tasks\n\n- [ ] Ship it\n', FALLBACK);
+
+    expect(day.tasks.map((task) => task.title)).toEqual(['Ship it']);
+    expect(day.extraSections).toEqual([]);
+  });
+
+  it('preserves prose above the first heading and inside the sections it owns', () => {
+    const source = [
+      '---',
+      'date: 2026-08-02',
+      'work_start: 09:00',
+      'work_end: 17:00',
+      '---',
+      '',
+      '# Sunday, 2 August 2026',
+      '',
+      'Working from the office today.',
+      '',
+      '## Tasks',
+      '',
+      '### Morning',
+      '',
+      '- [ ] Draft the RFC',
+      '',
+      '## Notes',
+      '',
+      '- Something I never got round to timestamping',
+      '',
+    ].join('\n');
+
+    const day = parseDay(source, FALLBACK);
+    expect(day.tasks.map((task) => task.title)).toEqual(['Draft the RFC']);
+
+    const written = serializeDay(day);
+    expect(written).toContain('Working from the office today.');
+    expect(written).toContain('### Morning');
+    expect(written).toContain('- Something I never got round to timestamping');
+
+    // Stable: a second pass neither loses the content nor duplicates it.
+    expect(serializeDay(parseDay(written, FALLBACK))).toBe(written);
   });
 
   it('skips a checkbox with no title', () => {

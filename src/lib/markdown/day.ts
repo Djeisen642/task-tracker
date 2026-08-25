@@ -62,7 +62,16 @@
 import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
 import type { Task, TaskStatus } from '../tasks.ts';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
-import { splitSections, trimBlankEdges, type ExtraSection } from './sections.ts';
+import {
+  emptyPreserved,
+  isHeading,
+  isPreservableLine,
+  preservedPreamble,
+  splitSections,
+  trimBlankEdges,
+  type ExtraSection,
+  type PreservedLines,
+} from './sections.ts';
 
 export type { ExtraSection } from './sections.ts';
 
@@ -114,6 +123,11 @@ export interface DayDocument {
   extraFields: Record<string, string>;
   /** Sections we don't own, kept in file order and re-emitted after Notes. */
   extraSections: ExtraSection[];
+  /**
+   * Lines inside the sections we *do* own that aren't items, plus anything
+   * above the first heading. Kept verbatim — see `PreservedLines`.
+   */
+  preserved: PreservedLines;
 }
 
 const TASKS_HEADING = '## Tasks';
@@ -133,7 +147,16 @@ const STATUS_TO_MARKER: Record<TaskStatus, string> = {
   completed: 'x',
 };
 
-const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
+/**
+ * A task line: any bullet, with the checkbox optional.
+ *
+ * Deliberately loose. A file this app writes always has `- [ ]`, but a file a
+ * human or an agent edited often has `- Ship the thing` or a numbered list.
+ * Requiring the checkbox meant those lines were not tasks, so they never
+ * appeared in the app — and the next write, which re-emits the section from
+ * the parsed tasks, deleted them from the only copy.
+ */
+const TASK_PATTERN = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[(.)\]\s*)?(.*)$/;
 /** A trailing `_(added 2026-07-30)_` — see the module doc. */
 const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
 /** `- 10:15 — text`, accepting an em dash, en dash or hyphen as the separator. */
@@ -160,18 +183,23 @@ function parseFormatVersion(raw: string | undefined): number {
  * without the suffix: an unannotated line means "first appeared here", which is
  * what every file written before the field existed is truthfully saying.
  */
-function parseTasks(lines: readonly string[], date: DateKey): Task[] {
+function parseTasks(lines: readonly string[], date: DateKey): { tasks: Task[]; extra: string[] } {
   const tasks: Task[] = [];
+  const extra: string[] = [];
 
   for (const line of lines) {
     const match = TASK_PATTERN.exec(line);
-    if (match === null) continue;
+    let title = (match?.[2] ?? '').trim();
+    if (match === null || title === '') {
+      // Not an item: a paragraph, a `###` subheading, a table. Keep it.
+      if (isPreservableLine(line)) extra.push(line);
+      continue;
+    }
 
-    const status = MARKER_TO_STATUS[match[1] ?? ''];
-    let title = (match[2] ?? '').trim();
-    // An unknown marker means someone is using a convention we don't model;
-    // skipping keeps the line intact on the next write rather than guessing.
-    if (status === undefined || title === '') continue;
+    // An unrecognized marker (`[-]`, `[>]`, whatever convention the writer
+    // brought with them) is still a task. Reading it as upcoming loses a shade
+    // of meaning; not reading it at all lost the line.
+    const status = MARKER_TO_STATUS[match[1] ?? ' '] ?? 'upcoming';
 
     let added = date;
     const dateMatch = ADDED_DATE_PATTERN.exec(title);
@@ -188,25 +216,28 @@ function parseTasks(lines: readonly string[], date: DateKey): Task[] {
     tasks.push({ title, status, added });
   }
 
-  return tasks;
+  return { tasks, extra };
 }
 
-function parseNotes(lines: readonly string[]): Note[] {
+function parseNotes(lines: readonly string[]): { notes: Note[]; extra: string[] } {
   const notes: Note[] = [];
+  const extra: string[] = [];
 
   for (const line of lines) {
     const match = NOTE_PATTERN.exec(line);
-    if (match === null) continue;
-
-    const time = match[1] ?? '';
-    const text = (match[2] ?? '').trim();
-    if (text === '') continue;
+    const text = (match?.[2] ?? '').trim();
+    if (match === null || text === '') {
+      // An untimed line can't be placed in the day's sequence, so it isn't
+      // modelled — but it is somebody's writing, so it is kept as written.
+      if (isPreservableLine(line)) extra.push(line);
+      continue;
+    }
 
     // Normalize `9:05` to `09:05` so sorting and rendering stay uniform.
-    notes.push({ time: time.padStart(5, '0'), text });
+    notes.push({ time: (match[1] ?? '').padStart(5, '0'), text });
   }
 
-  return notes;
+  return { notes, extra };
 }
 
 /**
@@ -219,7 +250,7 @@ export function parseDay(
   fallback: { date: DateKey; workStart: Clock; workEnd: Clock },
 ): DayDocument {
   const { fields, body } = parseFrontmatter(source);
-  const { sections } = splitSections(body);
+  const { preamble, sections } = splitSections(body);
 
   const extraFields: Record<string, string> = {};
   for (const [key, value] of Object.entries(fields)) {
@@ -230,13 +261,28 @@ export function parseDay(
 
   let tasks: Task[] = [];
   let notes: Note[] = [];
+  const preserved = emptyPreserved();
   const extraSections: ExtraSection[] = [];
+  let seenTasks = false;
+  let seenNotes = false;
+
+  // Anything above the first `##` heading, minus the title the app writes.
+  preserved.preamble = preservedPreamble(preamble);
 
   for (const section of sections) {
-    if (section.heading === TASKS_HEADING) {
-      tasks = parseTasks(section.lines, date);
-    } else if (section.heading === NOTES_HEADING) {
-      notes = parseNotes(section.lines);
+    // Case-insensitively, so a hand-written `## tasks` is the tasks section
+    // rather than somebody else's. A second section of the same name is left
+    // alone rather than silently replacing the first.
+    if (isHeading(section.heading, TASKS_HEADING) && !seenTasks) {
+      seenTasks = true;
+      const parsed = parseTasks(section.lines, date);
+      tasks = parsed.tasks;
+      preserved.tasks = parsed.extra;
+    } else if (isHeading(section.heading, NOTES_HEADING) && !seenNotes) {
+      seenNotes = true;
+      const parsed = parseNotes(section.lines);
+      notes = parsed.notes;
+      preserved.notes = parsed.extra;
     } else {
       extraSections.push({ heading: section.heading, lines: [...section.lines] });
     }
@@ -258,7 +304,33 @@ export function parseDay(
     notes,
     extraFields,
     extraSections,
+    preserved,
   };
+}
+
+/**
+ * One owned section: its items, then anything preserved from the file below
+ * them.
+ *
+ * Preserved lines go *after* the items because the app owns the ordering of
+ * what it models — notes sort by time, tasks move as they're edited — and
+ * there is no stable anchor to put a paragraph back between two items that may
+ * have swapped places. Keeping the content is the guarantee; keeping its exact
+ * line number is not.
+ */
+function section(
+  heading: string,
+  items: readonly string[],
+  placeholder: string,
+  preserved: readonly string[],
+): string {
+  const body = items.length > 0 ? [...items] : preserved.length > 0 ? [] : [placeholder];
+  if (preserved.length > 0) {
+    if (body.length > 0) body.push('');
+    body.push(...trimBlankEdges(preserved));
+  }
+
+  return [heading, '', ...body].join('\n');
 }
 
 /** Render a day document back to Markdown. Round-trips with `parseDay`. */
@@ -278,6 +350,9 @@ export function serializeDay(day: DayDocument): string {
   const heading = parsed === null ? day.date : describeDate(parsed);
 
   const blocks: string[] = [`# ${heading}`];
+  if (day.preserved.preamble.length > 0) {
+    blocks.push(trimBlankEdges(day.preserved.preamble).join('\n'));
+  }
 
   const taskLines = day.tasks.map((task) => {
     // Only when it differs from this file's own date — see the module doc.
@@ -285,16 +360,12 @@ export function serializeDay(day: DayDocument): string {
     const suffix = carried ? ` _(added ${String(task.added)})_` : '';
     return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
   });
-  blocks.push(
-    [TASKS_HEADING, '', ...(taskLines.length > 0 ? taskLines : ['_No tasks yet._'])].join('\n'),
-  );
+  blocks.push(section(TASKS_HEADING, taskLines, '_No tasks yet._', day.preserved.tasks));
 
   const noteLines = [...day.notes]
     .sort((a, b) => a.time.localeCompare(b.time))
     .map((note) => `- ${note.time} — ${note.text.trim()}`);
-  blocks.push(
-    [NOTES_HEADING, '', ...(noteLines.length > 0 ? noteLines : ['_No notes yet._'])].join('\n'),
-  );
+  blocks.push(section(NOTES_HEADING, noteLines, '_No notes yet._', day.preserved.notes));
 
   for (const section of day.extraSections) {
     blocks.push([section.heading, '', ...trimBlankEdges(section.lines)].join('\n'));
@@ -321,6 +392,7 @@ export function createDay(
     notes: [],
     extraFields: {},
     extraSections: [],
+    preserved: emptyPreserved(),
   };
 }
 

@@ -57,9 +57,82 @@ describe('parseTeamMember', () => {
     expect(member.notes.map((note) => note.text)).toEqual(['en dash', 'hyphen']);
   });
 
-  it('skips an unknown task marker rather than guessing at its meaning', () => {
+  it('reads an unknown task marker as upcoming rather than dropping the line', () => {
+    // This used to be "skip it rather than guess", on the theory that skipping
+    // left the line intact. It did not: the next write re-emitted the section
+    // from the parsed tasks only, so the line was deleted from the file — and
+    // in the app it was simply never there.
     const member = parseTeamMember('## Tasks\n\n- [?] Mystery\n- [ ] Real\n', FALLBACK);
-    expect(member.tasks).toEqual([{ title: 'Real', status: 'upcoming' }]);
+
+    expect(member.tasks).toEqual([
+      { title: 'Mystery', status: 'upcoming' },
+      { title: 'Real', status: 'upcoming' },
+    ]);
+    expect(serializeTeamMember(member)).toContain('- [ ] Mystery');
+  });
+
+  it('reads a bullet with no checkbox as a task', () => {
+    const member = parseTeamMember('## Tasks\n\n- Ship the migration\n', FALLBACK);
+    expect(member.tasks).toEqual([{ title: 'Ship the migration', status: 'upcoming' }]);
+  });
+
+  it('reads a numbered list as tasks', () => {
+    const member = parseTeamMember('## Tasks\n\n1. [ ] First\n2) Second\n', FALLBACK);
+    expect(member.tasks.map((task) => task.title)).toEqual(['First', 'Second']);
+  });
+
+  it('reads a lower-case section heading', () => {
+    const member = parseTeamMember('## tasks\n\n- [ ] Ship it\n', FALLBACK);
+
+    expect(member.tasks).toEqual([{ title: 'Ship it', status: 'upcoming' }]);
+    expect(member.extraSections).toEqual([]);
+  });
+
+  it('keeps a second section of the same name rather than replacing the first', () => {
+    const member = parseTeamMember(
+      '## Tasks\n\n- [ ] First\n\n## Tasks\n\n- [ ] Second\n',
+      FALLBACK,
+    );
+
+    expect(member.tasks).toEqual([{ title: 'First', status: 'upcoming' }]);
+    expect(member.extraSections).toEqual([
+      { heading: '## Tasks', lines: ['', '- [ ] Second', ''] },
+    ]);
+    expect(serializeTeamMember(member)).toContain('- [ ] Second');
+  });
+
+  it('preserves prose inside the sections it owns', () => {
+    const source = [
+      '---',
+      'person: alice',
+      '---',
+      '',
+      '# @alice',
+      '',
+      'Joined the team in June. Prefers written feedback.',
+      '',
+      '## Tasks',
+      '',
+      '### This quarter',
+      '',
+      '- [ ] Ship the migration',
+      '',
+      '## Notes',
+      '',
+      '- Undated thought about the reorg',
+      '',
+    ].join('\n');
+
+    const member = parseTeamMember(source, FALLBACK);
+    expect(member.tasks).toEqual([{ title: 'Ship the migration', status: 'upcoming' }]);
+
+    const written = serializeTeamMember(member);
+    expect(written).toContain('Joined the team in June. Prefers written feedback.');
+    expect(written).toContain('### This quarter');
+    expect(written).toContain('- Undated thought about the reorg');
+
+    // And it stays put: a second write neither loses it nor duplicates it.
+    expect(serializeTeamMember(parseTeamMember(written, FALLBACK))).toBe(written);
   });
 
   it('falls back for a file with no frontmatter', () => {
@@ -205,6 +278,7 @@ describe('createTeamMember', () => {
       notes: [],
       extraFields: {},
       extraSections: [],
+      preserved: { preamble: [], tasks: [], notes: [] },
     });
   });
 });

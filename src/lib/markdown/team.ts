@@ -41,7 +41,16 @@
 import type { DateKey } from '../dates.ts';
 import type { Task, TaskStatus } from '../tasks.ts';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
-import { splitSections, trimBlankEdges, type ExtraSection } from './sections.ts';
+import {
+  emptyPreserved,
+  isHeading,
+  isPreservableLine,
+  preservedPreamble,
+  splitSections,
+  trimBlankEdges,
+  type ExtraSection,
+  type PreservedLines,
+} from './sections.ts';
 
 /** A dated note about a report. `date` is the day it was logged, not a time. */
 export interface TeamNote {
@@ -65,6 +74,12 @@ export interface TeamMemberDocument {
   extraFields: Record<string, string>;
   /** Sections we don't own, kept in file order and re-emitted after Notes. */
   extraSections: ExtraSection[];
+  /**
+   * Lines inside the sections we *do* own that aren't items — a paragraph of
+   * context above the task list, a `###` subheading, a note written without a
+   * date. Kept verbatim and written back, because this file is the only copy.
+   */
+  preserved: PreservedLines;
 }
 
 const TASKS_HEADING = '## Tasks';
@@ -84,7 +99,16 @@ const STATUS_TO_MARKER: Record<TaskStatus, string> = {
   completed: 'x',
 };
 
-const TASK_PATTERN = /^\s*[-*]\s*\[(.)\]\s*(.*)$/;
+/**
+ * A task line: any bullet, with the checkbox optional.
+ *
+ * Deliberately loose. A manager typing into this file by hand — or an agent
+ * asked to "add a task for greg" — writes `- Ship the migration` as often as
+ * `- [ ] Ship the migration`, and a numbered list about as often as a dashed
+ * one. Requiring the checkbox meant those lines were not tasks, so the app
+ * showed nothing and then deleted them on its next write.
+ */
+const TASK_PATTERN = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[(.)\]\s*)?(.*)$/;
 /** A trailing `_(2026-08-03)_` on a completed task line — see the module doc. */
 const COMPLETED_DATE_PATTERN = /\s*_\((\d{4}-\d{2}-\d{2})\)_\s*$/;
 /** `- 2026-08-10 — text`, accepting an em dash, en dash or hyphen as the separator. */
@@ -96,19 +120,25 @@ const OWNED_FIELDS = ['person'];
 function parseTasks(lines: readonly string[]): {
   tasks: Task[];
   completedDates: Record<string, DateKey>;
+  extra: string[];
 } {
   const tasks: Task[] = [];
   const completedDates: Record<string, DateKey> = {};
+  const extra: string[] = [];
 
   for (const line of lines) {
     const match = TASK_PATTERN.exec(line);
-    if (match === null) continue;
+    let title = (match?.[2] ?? '').trim();
+    if (match === null || title === '') {
+      // Not an item: a paragraph, a `###` subheading, a table. Keep it.
+      if (isPreservableLine(line)) extra.push(line);
+      continue;
+    }
 
-    const status = MARKER_TO_STATUS[match[1] ?? ''];
-    let title = (match[2] ?? '').trim();
-    // An unknown marker means someone is using a convention we don't model;
-    // skipping keeps the line intact on the next write rather than guessing.
-    if (status === undefined || title === '') continue;
+    // An unrecognized marker (`[-]`, `[>]`, whatever convention the writer
+    // brought with them) is still a task. Showing it as upcoming loses the
+    // shade of meaning; not showing it at all lost the line.
+    const status = MARKER_TO_STATUS[match[1] ?? ' '] ?? 'upcoming';
 
     if (status === 'completed') {
       const dateMatch = COMPLETED_DATE_PATTERN.exec(title);
@@ -123,24 +153,27 @@ function parseTasks(lines: readonly string[]): {
     tasks.push({ title, status });
   }
 
-  return { tasks, completedDates };
+  return { tasks, completedDates, extra };
 }
 
-function parseNotes(lines: readonly string[]): TeamNote[] {
+function parseNotes(lines: readonly string[]): { notes: TeamNote[]; extra: string[] } {
   const notes: TeamNote[] = [];
+  const extra: string[] = [];
 
   for (const line of lines) {
     const match = NOTE_PATTERN.exec(line);
-    if (match === null) continue;
+    const text = (match?.[2] ?? '').trim();
+    if (match === null || text === '') {
+      // A note with no date can't be placed in a week, so it isn't modelled —
+      // but it is somebody's writing, so it is kept exactly as they left it.
+      if (isPreservableLine(line)) extra.push(line);
+      continue;
+    }
 
-    const date = match[1] ?? '';
-    const text = (match[2] ?? '').trim();
-    if (text === '') continue;
-
-    notes.push({ date, text });
+    notes.push({ date: match[1] ?? '', text });
   }
 
-  return notes;
+  return { notes, extra };
 }
 
 /**
@@ -150,7 +183,7 @@ function parseNotes(lines: readonly string[]): TeamNote[] {
  */
 export function parseTeamMember(source: string, fallback: { person: string }): TeamMemberDocument {
   const { fields, body } = parseFrontmatter(source);
-  const { sections } = splitSections(body);
+  const { preamble, sections } = splitSections(body);
 
   const extraFields: Record<string, string> = {};
   for (const [key, value] of Object.entries(fields)) {
@@ -160,13 +193,30 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
   let tasks: Task[] = [];
   let completedDates: Record<string, DateKey> = {};
   let notes: TeamNote[] = [];
+  const preserved = emptyPreserved();
   const extraSections: ExtraSection[] = [];
+  let seenTasks = false;
+  let seenNotes = false;
+
+  // Anything above the first `##` heading. The app never writes here, so this
+  // is always somebody's own words — and it used to be dropped on every write.
+  preserved.preamble = preservedPreamble(preamble);
 
   for (const section of sections) {
-    if (section.heading === TASKS_HEADING) {
-      ({ tasks, completedDates } = parseTasks(section.lines));
-    } else if (section.heading === NOTES_HEADING) {
-      notes = parseNotes(section.lines);
+    // Case-insensitively: `## tasks` is the tasks section. A second section of
+    // the same name is somebody's own structure and is preserved as-is rather
+    // than silently replacing the first.
+    if (isHeading(section.heading, TASKS_HEADING) && !seenTasks) {
+      seenTasks = true;
+      const parsed = parseTasks(section.lines);
+      tasks = parsed.tasks;
+      completedDates = parsed.completedDates;
+      preserved.tasks = parsed.extra;
+    } else if (isHeading(section.heading, NOTES_HEADING) && !seenNotes) {
+      seenNotes = true;
+      const parsed = parseNotes(section.lines);
+      notes = parsed.notes;
+      preserved.notes = parsed.extra;
     } else {
       extraSections.push({ heading: section.heading, lines: [...section.lines] });
     }
@@ -179,7 +229,33 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
     notes,
     extraFields,
     extraSections,
+    preserved,
   };
+}
+
+/**
+ * One owned section: its items, then anything preserved from the file below
+ * them.
+ *
+ * Preserved lines go *after* the items rather than at their original offsets
+ * because the app owns the ordering of what it models — a completed task moves,
+ * a note sorts by date — and there is no stable anchor to put prose back
+ * between two items that may have swapped places. Keeping the content is the
+ * guarantee; keeping its exact line number is not.
+ */
+function section(
+  heading: string,
+  items: readonly string[],
+  placeholder: string,
+  preserved: readonly string[],
+): string {
+  const body = items.length > 0 ? [...items] : preserved.length > 0 ? [] : [placeholder];
+  if (preserved.length > 0) {
+    if (body.length > 0) body.push('');
+    body.push(...trimBlankEdges(preserved));
+  }
+
+  return [heading, '', ...body].join('\n');
 }
 
 /** Render a team document back to Markdown. Round-trips with `parseTeamMember`. */
@@ -189,25 +265,21 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
     ...member.extraFields,
   };
 
+  const preserved = member.preserved;
   const blocks: string[] = [`# @${member.person}`];
+  if (preserved.preamble.length > 0) blocks.push(trimBlankEdges(preserved.preamble).join('\n'));
 
   const taskLines = member.tasks.map((task) => {
     const date = task.status === 'completed' ? member.completedDates[task.title] : undefined;
     const suffix = date === undefined ? '' : ` _(${date})_`;
     return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
   });
-  blocks.push(
-    [TASKS_HEADING, '', ...(taskLines.length > 0 ? taskLines : ['_Nothing tracked yet._'])].join(
-      '\n',
-    ),
-  );
+  blocks.push(section(TASKS_HEADING, taskLines, '_Nothing tracked yet._', preserved.tasks));
 
   const noteLines = [...member.notes]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((note) => `- ${note.date} — ${note.text.trim()}`);
-  blocks.push(
-    [NOTES_HEADING, '', ...(noteLines.length > 0 ? noteLines : ['_No notes yet._'])].join('\n'),
-  );
+  blocks.push(section(NOTES_HEADING, noteLines, '_No notes yet._', preserved.notes));
 
   for (const section of member.extraSections) {
     blocks.push([section.heading, '', ...trimBlankEdges(section.lines)].join('\n'));
@@ -218,7 +290,15 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
 
 /** A fresh, empty team document for `person`. */
 export function createTeamMember(person: string): TeamMemberDocument {
-  return { person, tasks: [], completedDates: {}, notes: [], extraFields: {}, extraSections: [] };
+  return {
+    person,
+    tasks: [],
+    completedDates: {},
+    notes: [],
+    extraFields: {},
+    extraSections: [],
+    preserved: emptyPreserved(),
+  };
 }
 
 /**

@@ -161,9 +161,23 @@ docs/
 - **The Markdown is the source of truth.** Not a cache, not an export. If a
   SQLite index is ever added it must be _derived_ and rebuildable — never written
   before the Markdown. See `docs/future-work.md`.
-- **Hand edits survive.** `parseDay`/`serializeDay` preserve unowned sections and
-  frontmatter keys verbatim. You or an agent may edit a day file directly, and
-  the next app write must not eat it.
+- **Hand edits survive — including inside the sections the app owns.** Whole
+  unowned sections and frontmatter keys were always preserved; everything else
+  in the file was not, and the app rewrites that file on every check-in. Three
+  kinds of content were silently deleted: anything above the first `##` heading,
+  a `###` subheading and its body (that is section _content_, not a section),
+  and any line inside `## Tasks`/`## Notes` that wasn't an item. They now live
+  in `DayDocument.preserved` / `TeamMemberDocument.preserved` and are re-emitted
+  below the items — the content is the guarantee, its exact line number is not.
+  Anything new that reads a section must keep what it doesn't model.
+- **Read the file the way people write it, not the way the app writes it.** A
+  task line is any bullet — `-`, `*`, `+`, or `1.` — with the checkbox
+  _optional_, and an unrecognized marker (`[-]`, `[>]`) reads as upcoming rather
+  than being skipped. Owned headings match case-insensitively, so `## tasks` is
+  the tasks section. This is what a report file actually looks like after a
+  human or an agent has typed into it, and every one of those shapes used to be
+  invisible in the app _and_ deleted on the next write. The report was "I can
+  see the item in the Greg file but it's not showing up in the app.
 - **A task keeps the date it first appeared; the suffix is written only when it
   outlives that day.** `_(added YYYY-MM-DD)_` on a day-file task means "this
   predates this file", so its presence _is_ the carried-over marker and a day of
