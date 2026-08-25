@@ -4,9 +4,10 @@ Guidance for working in this repository. Read this before making changes.
 
 ## What this is
 
-**Task Tracker** — an ultra-lightweight Windows system-tray utility that prompts
-you every hour during your workday to log what you're doing: add upcoming tasks,
-move in-progress ones to done, and jot notes. At work start it shows the day's
+**Task Tracker** — an ultra-lightweight system-tray utility (Windows tray, macOS
+menu bar, Linux panel) that prompts you every hour during your workday to log
+what you're doing: add upcoming tasks, move in-progress ones to done, and jot
+notes. At work start it shows the day's
 list prominently; at work end it asks for the final update and tomorrow's plan.
 
 **The vault is the product.** Everything is stored as plain Markdown, one file
@@ -313,6 +314,20 @@ docs/
   without it the panel is on screen permanently, covering the card, and the app
   looks dead on launch. Any new `hidden` element with a `display` rule needs the
   same line.
+- **Transparency on macOS is off by default and fails silently.** A transparent
+  window there needs _both_ `app.macOSPrivateApi: true` in `tauri.conf.json` and
+  the `macos-private-api` Cargo feature on `tauri`; with only one of them the
+  card paints on an opaque rectangle, and nothing in lint, tests or a Linux/
+  Windows build says a word. The pair is enabled — keep them together. (It also
+  means the app can't ship on the Mac App Store, which is fine: it's a direct
+  download.)
+- **Installers are built per-OS, never cross-compiled.** `tauri build` on a
+  Windows machine makes an `.msi`/`.exe`; on macOS, the universal-target flag
+  from the README makes one `.dmg` covering both chips; this sandbox can
+  prove the Linux `.deb`/`.rpm`/`.AppImage` and nothing else. There is no CI
+  job doing this — a change to packaging needs a manual build on the
+  platform it touches, since the sandbox can't stand in for one it doesn't
+  have.
 - **Filenames are validated in Rust.** `is_safe_name` in `src-tauri/src/vault.rs`
   is the security boundary; the TypeScript `isSafeVaultName` is an early-failure
   convenience. Keep both in sync, and never widen the Rust one to a general path.
@@ -424,9 +439,9 @@ Then all four gates run (~90s for the first `cargo check`; seconds after that).
 Verified in this sandbox. Don't conclude from the first error that Rust can only
 be checked in CI, and don't report the Rust gate as passing without running it.
 
-What this environment lacks is a **desktop webview and a Windows machine**, so
-the following are _reviewed for correctness but never executed_. Verify each on
-real hardware before trusting it. The full list lives in `docs/future-work.md`
+What this environment lacks is a **desktop webview and any real desktop machine**
+(no Windows, no macOS), so the following are _reviewed for correctness but never
+executed_. Verify each on real hardware before trusting it. The full list lives in `docs/future-work.md`
 under "Known unknowns"; the headlines:
 
 - **Windows foreground activation.** `SetForegroundWindow` is refused for a

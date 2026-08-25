@@ -240,9 +240,18 @@ agent doesn't attempt the within-file comparison that cannot work.
 
 - Taskbar-aware placement: respect the OS work area, not just the monitor bounds.
 - Per-monitor DPI correctness for the card's size.
-- A signed Windows installer and an auto-update channel.
-- macOS and Linux support (the code is portable; only the tray and positioning
-  have been reasoned about for Windows).
+- Code signing and an auto-update channel: an Authenticode-signed Windows
+  installer, a notarized macOS `.dmg`, and the update endpoint that wants the
+  same keys. Until then every platform greets the download with a warning
+  (README, "Installing an unsigned build").
+- macOS and Linux polish. `pnpm run tauri build` (universal-target flag on
+  macOS, see README) now produces a `.dmg` and deb/rpm/AppImage alongside the
+  Windows installers — but the tray icon is the same colour art on all
+  three, where the macOS menu bar wants a template image that follows the
+  light/dark bar. Decide that with a real menu bar in front of you, not from
+  the docs.
+- A CI job that actually builds the three installers, so a packaging change
+  fails before it lands instead of on the next manual build.
 - Coverage thresholds in CI.
 
 ---
@@ -253,8 +262,8 @@ The Rust compiles and its tests pass — `cargo check`, `cargo test`, `cargo
 clippy --all-targets -- -D warnings` and `cargo fmt --check` were all run
 against this tree, and `Cargo.lock` is committed.
 
-What was **never executed** is anything requiring a desktop webview or a Windows
-machine. The list below is reviewed for correctness only; verify each on real
+What was **never executed** is anything requiring a desktop webview — on any
+platform. The list below is reviewed for correctness only; verify each on real
 hardware before trusting it:
 
 1. **Windows foreground activation.** `SetForegroundWindow` is refused for a
@@ -284,9 +293,21 @@ hardware before trusting it:
    actually darkening the time picker's dropdown.
 8. **The whole loop end to end** — a real workday of hourly prompts producing a
    day file you'd actually want to read back.
-9. **The expand/collapse toggle's `setSize` call**, against a window configured
-   `resizable: false`. Programmatic resize is expected to work regardless of
-   that flag — it's a common pattern for splash-to-main-window transitions —
-   but it's unverified against a real Windows compositor, and so is whether
-   re-invoking `position_checkin` after the resize reliably keeps the window
-   pinned to the same corner rather than a platform re-centering it.
+9. **macOS specifics.** Three things differ there and none has been seen: the
+   card is transparent only because `macOSPrivateApi` + the `macos-private-api`
+   Cargo feature are enabled (without them it paints opaque, and the failure is
+   silent); `ActivationPolicy::Accessory` is what keeps it out of the Dock and
+   the ⌘-Tab switcher, which also means `request_user_attention` has no Dock
+   icon to bounce; and the tray icon is colour art rather than a template image,
+   so check how it sits in a dark menu bar.
+10. **Linux specifics.** Transparency needs a compositing window manager — under
+    a bare X11 session without one the card's rounded corners get a black box
+    behind them. The tray needs a panel that speaks StatusNotifier (GNOME needs
+    an AppIndicator extension; KDE and most others are fine), and `skipTaskbar`
+    is an X11 hint some Wayland compositors ignore.
+11. **The expand/collapse toggle's `setSize` call**, against a window configured
+    `resizable: false`. Programmatic resize is expected to work regardless of
+    that flag — it's a common pattern for splash-to-main-window transitions —
+    but it's unverified against a real Windows compositor, and so is whether
+    re-invoking `position_checkin` after the resize reliably keeps the window
+    pinned to the same corner rather than a platform re-centering it.
