@@ -65,8 +65,10 @@ import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
 import {
   emptyPreserved,
   isHeading,
-  isPreservableLine,
+  isPlaceholder,
+  preservedLines,
   preservedPreamble,
+  renderSection,
   splitSections,
   trimBlankEdges,
   type ExtraSection,
@@ -192,7 +194,7 @@ function parseTasks(lines: readonly string[], date: DateKey): { tasks: Task[]; e
     let title = (match?.[2] ?? '').trim();
     if (match === null || title === '') {
       // Not an item: a paragraph, a `###` subheading, a table. Keep it.
-      if (isPreservableLine(line)) extra.push(line);
+      if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
 
@@ -229,7 +231,7 @@ function parseNotes(lines: readonly string[]): { notes: Note[]; extra: string[] 
     if (match === null || text === '') {
       // An untimed line can't be placed in the day's sequence, so it isn't
       // modelled — but it is somebody's writing, so it is kept as written.
-      if (isPreservableLine(line)) extra.push(line);
+      if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
 
@@ -277,12 +279,12 @@ export function parseDay(
       seenTasks = true;
       const parsed = parseTasks(section.lines, date);
       tasks = parsed.tasks;
-      preserved.tasks = parsed.extra;
+      preserved.tasks = preservedLines(parsed.extra);
     } else if (isHeading(section.heading, NOTES_HEADING) && !seenNotes) {
       seenNotes = true;
       const parsed = parseNotes(section.lines);
       notes = parsed.notes;
-      preserved.notes = parsed.extra;
+      preserved.notes = preservedLines(parsed.extra);
     } else {
       extraSections.push({ heading: section.heading, lines: [...section.lines] });
     }
@@ -306,31 +308,6 @@ export function parseDay(
     extraSections,
     preserved,
   };
-}
-
-/**
- * One owned section: its items, then anything preserved from the file below
- * them.
- *
- * Preserved lines go *after* the items because the app owns the ordering of
- * what it models — notes sort by time, tasks move as they're edited — and
- * there is no stable anchor to put a paragraph back between two items that may
- * have swapped places. Keeping the content is the guarantee; keeping its exact
- * line number is not.
- */
-function section(
-  heading: string,
-  items: readonly string[],
-  placeholder: string,
-  preserved: readonly string[],
-): string {
-  const body = items.length > 0 ? [...items] : preserved.length > 0 ? [] : [placeholder];
-  if (preserved.length > 0) {
-    if (body.length > 0) body.push('');
-    body.push(...trimBlankEdges(preserved));
-  }
-
-  return [heading, '', ...body].join('\n');
 }
 
 /** Render a day document back to Markdown. Round-trips with `parseDay`. */
@@ -360,12 +337,12 @@ export function serializeDay(day: DayDocument): string {
     const suffix = carried ? ` _(added ${String(task.added)})_` : '';
     return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
   });
-  blocks.push(section(TASKS_HEADING, taskLines, '_No tasks yet._', day.preserved.tasks));
+  blocks.push(renderSection(TASKS_HEADING, taskLines, '_No tasks yet._', day.preserved.tasks));
 
   const noteLines = [...day.notes]
     .sort((a, b) => a.time.localeCompare(b.time))
     .map((note) => `- ${note.time} — ${note.text.trim()}`);
-  blocks.push(section(NOTES_HEADING, noteLines, '_No notes yet._', day.preserved.notes));
+  blocks.push(renderSection(NOTES_HEADING, noteLines, '_No notes yet._', day.preserved.notes));
 
   for (const section of day.extraSections) {
     blocks.push([section.heading, '', ...trimBlankEdges(section.lines)].join('\n'));

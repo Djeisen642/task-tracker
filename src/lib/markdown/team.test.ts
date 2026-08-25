@@ -101,6 +101,47 @@ describe('parseTeamMember', () => {
     expect(serializeTeamMember(member)).toContain('- [ ] Second');
   });
 
+  it('keeps the paragraph break between two preserved paragraphs', () => {
+    // The blank line *is* the paragraph break in Markdown. Dropping it as
+    // "layout" silently merged two paragraphs of somebody's writing into one.
+    const source = '---\nperson: alice\n---\n\n# @alice\n\n## Tasks\n\nPara one.\n\nPara two.\n';
+    const written = serializeTeamMember(parseTeamMember(source, FALLBACK));
+
+    expect(written).toContain('Para one.\n\nPara two.');
+    expect(serializeTeamMember(parseTeamMember(written, FALLBACK))).toBe(written);
+  });
+
+  it("keeps a line that merely resembles a rollup's generated placeholder", () => {
+    // Only the placeholders *this* format writes are the app's own output. A
+    // weekly rollup's wording is not, and deleting someone's line for looking
+    // like generated text is the bug this file is fixing, not an exception.
+    const source =
+      '---\nperson: alice\n---\n\n# @alice\n\n## Notes\n\n_No kudos recorded this week._\n';
+
+    expect(serializeTeamMember(parseTeamMember(source, FALLBACK))).toContain(
+      '_No kudos recorded this week._',
+    );
+  });
+
+  it('drops its own empty-section placeholder rather than preserving it', () => {
+    const source = '---\nperson: alice\n---\n\n# @alice\n\n## Tasks\n\n_Nothing tracked yet._\n';
+    const member = parseTeamMember(source, FALLBACK);
+
+    expect(member.preserved.tasks).toEqual([]);
+    // And it comes back exactly once, because the section is still empty.
+    expect(serializeTeamMember(member).match(/_Nothing tracked yet\._/g)).toHaveLength(1);
+  });
+
+  it('flattens a nested bullet into a task of its own', () => {
+    // There is no sub-task in this model, so an indented bullet becomes a task.
+    // Documented rather than fixed: the alternative on the way in was deleting
+    // the line, and inventing a hierarchy the file format cannot express would
+    // be worse than reading it as the flat list the app actually stores.
+    const member = parseTeamMember('## Tasks\n\n- [ ] Parent\n  - detail\n', FALLBACK);
+
+    expect(member.tasks.map((task) => task.title)).toEqual(['Parent', 'detail']);
+  });
+
   it('preserves prose inside the sections it owns', () => {
     const source = [
       '---',

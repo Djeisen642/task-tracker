@@ -41,28 +41,34 @@ export function emptyPreserved(): PreservedLines {
 }
 
 /**
- * The placeholders the app writes into an empty section.
+ * The placeholders the app writes into an empty section of a day or team file.
  *
  * They are the app's own output, not content, so reading one back must not
  * preserve it — otherwise every empty-then-filled section keeps a fossil
  * "_No tasks yet._" above its first real entry, forever.
+ *
+ * Only what *these two formats* write belongs here. A rollup's placeholders are
+ * not on the list even though they look the same: a rollup is a derived file
+ * that is never parsed, so listing its wording here would only mean deleting a
+ * line from someone's day file for the crime of resembling generated text.
  */
-const PLACEHOLDERS = new Set([
-  '_No tasks yet._',
-  '_No notes yet._',
-  '_Nothing tracked yet._',
-  '_No kudos recorded this week._',
-]);
+const PLACEHOLDERS = new Set(['_No tasks yet._', '_No notes yet._', '_Nothing tracked yet._']);
+
+/** `true` when a line is one of the app's own empty-section placeholders. */
+export function isPlaceholder(line: string): boolean {
+  return PLACEHOLDERS.has(line.trim());
+}
 
 /**
- * `true` when a line inside an owned section is content worth keeping.
+ * Preserved lines, ready to store: placeholders removed, blank edges trimmed,
+ * and everything else — blank lines in the middle included — left alone.
  *
- * Blank lines are dropped because the section's own layout is re-emitted; a
- * placeholder is dropped because the app wrote it.
+ * The interior blanks matter. Dropping them silently turned two paragraphs of
+ * somebody's writing into one, because in Markdown that blank line *is* the
+ * paragraph break. Preserving content means preserving what it says.
  */
-export function isPreservableLine(line: string): boolean {
-  const trimmed = line.trim();
-  return trimmed !== '' && !PLACEHOLDERS.has(trimmed);
+export function preservedLines(lines: readonly string[]): string[] {
+  return trimBlankEdges(lines.filter((line) => !isPlaceholder(line)));
 }
 
 /**
@@ -82,10 +88,10 @@ export function preservedPreamble(lines: readonly string[]): string[] {
       titleSeen = true;
       continue;
     }
-    if (isPreservableLine(line)) kept.push(line);
+    kept.push(line);
   }
 
-  return kept;
+  return preservedLines(kept);
 }
 
 /**
@@ -126,6 +132,35 @@ export function splitSections(body: string): { preamble: string[]; sections: Sec
   }
 
   return { preamble, sections };
+}
+
+/**
+ * One owned section: its items, then anything preserved from the file below
+ * them.
+ *
+ * Preserved lines go *after* the items because the app owns the ordering of
+ * what it models — notes sort by time, tasks move as they are edited — and
+ * there is no stable anchor to put a paragraph back between two items that may
+ * have swapped places. Keeping the content is the guarantee; keeping its exact
+ * line number is not.
+ *
+ * The placeholder appears only when the section is genuinely empty: with
+ * preserved prose and no items, "_No tasks yet._" above someone's paragraph
+ * reads as the app talking over them.
+ */
+export function renderSection(
+  heading: string,
+  items: readonly string[],
+  placeholder: string,
+  preserved: readonly string[],
+): string {
+  const body = items.length > 0 ? [...items] : preserved.length > 0 ? [] : [placeholder];
+  if (preserved.length > 0) {
+    if (body.length > 0) body.push('');
+    body.push(...trimBlankEdges(preserved));
+  }
+
+  return [heading, '', ...body].join('\n');
 }
 
 /** Trim leading and trailing blank lines from a preserved section body. */

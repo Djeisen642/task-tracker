@@ -44,8 +44,10 @@ import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
 import {
   emptyPreserved,
   isHeading,
-  isPreservableLine,
+  isPlaceholder,
+  preservedLines,
   preservedPreamble,
+  renderSection,
   splitSections,
   trimBlankEdges,
   type ExtraSection,
@@ -131,7 +133,7 @@ function parseTasks(lines: readonly string[]): {
     let title = (match?.[2] ?? '').trim();
     if (match === null || title === '') {
       // Not an item: a paragraph, a `###` subheading, a table. Keep it.
-      if (isPreservableLine(line)) extra.push(line);
+      if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
 
@@ -166,7 +168,7 @@ function parseNotes(lines: readonly string[]): { notes: TeamNote[]; extra: strin
     if (match === null || text === '') {
       // A note with no date can't be placed in a week, so it isn't modelled —
       // but it is somebody's writing, so it is kept exactly as they left it.
-      if (isPreservableLine(line)) extra.push(line);
+      if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
 
@@ -211,12 +213,12 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
       const parsed = parseTasks(section.lines);
       tasks = parsed.tasks;
       completedDates = parsed.completedDates;
-      preserved.tasks = parsed.extra;
+      preserved.tasks = preservedLines(parsed.extra);
     } else if (isHeading(section.heading, NOTES_HEADING) && !seenNotes) {
       seenNotes = true;
       const parsed = parseNotes(section.lines);
       notes = parsed.notes;
-      preserved.notes = parsed.extra;
+      preserved.notes = preservedLines(parsed.extra);
     } else {
       extraSections.push({ heading: section.heading, lines: [...section.lines] });
     }
@@ -231,31 +233,6 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
     extraSections,
     preserved,
   };
-}
-
-/**
- * One owned section: its items, then anything preserved from the file below
- * them.
- *
- * Preserved lines go *after* the items rather than at their original offsets
- * because the app owns the ordering of what it models — a completed task moves,
- * a note sorts by date — and there is no stable anchor to put prose back
- * between two items that may have swapped places. Keeping the content is the
- * guarantee; keeping its exact line number is not.
- */
-function section(
-  heading: string,
-  items: readonly string[],
-  placeholder: string,
-  preserved: readonly string[],
-): string {
-  const body = items.length > 0 ? [...items] : preserved.length > 0 ? [] : [placeholder];
-  if (preserved.length > 0) {
-    if (body.length > 0) body.push('');
-    body.push(...trimBlankEdges(preserved));
-  }
-
-  return [heading, '', ...body].join('\n');
 }
 
 /** Render a team document back to Markdown. Round-trips with `parseTeamMember`. */
@@ -274,12 +251,12 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
     const suffix = date === undefined ? '' : ` _(${date})_`;
     return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
   });
-  blocks.push(section(TASKS_HEADING, taskLines, '_Nothing tracked yet._', preserved.tasks));
+  blocks.push(renderSection(TASKS_HEADING, taskLines, '_Nothing tracked yet._', preserved.tasks));
 
   const noteLines = [...member.notes]
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((note) => `- ${note.date} — ${note.text.trim()}`);
-  blocks.push(section(NOTES_HEADING, noteLines, '_No notes yet._', preserved.notes));
+  blocks.push(renderSection(NOTES_HEADING, noteLines, '_No notes yet._', preserved.notes));
 
   for (const section of member.extraSections) {
     blocks.push([section.heading, '', ...trimBlankEdges(section.lines)].join('\n'));
