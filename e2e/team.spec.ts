@@ -92,6 +92,24 @@ test("cycles a report's task through its three states", async ({ page }) => {
   await expect(task).not.toHaveClass(/is-in-progress|is-completed/);
 });
 
+test("offers no ranking controls on a report's tasks", async ({ page }) => {
+  await startApp(page);
+  await openTeam(page);
+
+  await page.fill('#team-person-input', 'alice');
+  await page.press('#team-person-input', 'Enter');
+  await page.fill('#team-task-input', 'Ship the rollback');
+  await page.press('#team-task-input', 'Enter');
+
+  // The top five is the user's own day, not a ranking handed to a report — and
+  // `team.<person>.md` has no syntax for one, so a star here would write a rank
+  // the file cannot round-trip.
+  await expect(page.locator('#team-task-list .task')).toHaveCount(1);
+  await expect(page.locator('#team-task-list .task-priority')).toHaveCount(0);
+  await expect(page.locator('#team-task-list .task-move')).toHaveCount(0);
+  await expect(page.locator('#team-task-list .task-rank')).toHaveCount(0);
+});
+
 test('removes a task from a report', async ({ page }) => {
   await startApp(page);
   await openTeam(page);

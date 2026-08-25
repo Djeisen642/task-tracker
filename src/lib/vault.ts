@@ -14,7 +14,7 @@ import {
   serializeTeamMember,
   type TeamMemberDocument,
 } from './markdown/team.ts';
-import { carryOverTasks } from './tasks.ts';
+import { carryOverTasks, normalizePriorities } from './tasks.ts';
 
 /** Storage for vault files, keyed by filename. */
 export interface VaultPort {
@@ -130,6 +130,14 @@ export async function writeDay(vault: VaultPort, day: DayDocument): Promise<void
  *
  * The create path is where a workday actually begins: yesterday's unfinished
  * work becomes today's starting list, which is what the day-start prompt shows.
+ *
+ * The ranking is normalized on the way out, and this is the only read that does
+ * it — `readDay` stays faithful to the bytes on disk, because the rollups
+ * report what the files say. This one is different: the app is about to *edit*
+ * this document, and every mutator maintains the dense-`1…n` invariant, so
+ * without it a hand-edited file ranked `2, 3, 4` would draw badges starting at
+ * two and disable the top row's own "move up" arrow. Nothing is written until
+ * the user does something, so a file the app merely opens is left alone.
  */
 export async function openDay(
   vault: VaultPort,
@@ -138,7 +146,7 @@ export async function openDay(
   workEnd: Clock,
 ): Promise<DayDocument> {
   const existing = await readDay(vault, date, workStart, workEnd);
-  if (existing !== null) return existing;
+  if (existing !== null) return { ...existing, tasks: normalizePriorities(existing.tasks) };
 
   const keys = await listDayKeys(vault);
   const previousKey = previousDayKey(keys, date);

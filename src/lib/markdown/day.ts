@@ -22,8 +22,8 @@
  *
  * ## Tasks
  *
- * - [ ] Draft the RFC _(added 2026-07-30)_
- * - [/] Ship the migration rollback
+ * - [ ] Draft the RFC _(priority 2)_ _(added 2026-07-30)_
+ * - [/] Ship the migration rollback _(priority 1)_
  * - [x] Review the release checklist
  *
  * ## Notes
@@ -39,6 +39,21 @@
  * the team file uses for *completion*, because the two files sit in one folder
  * and an unlabelled date that means opposite things in each is a trap for
  * whoever reads the vault next.
+ *
+ * `_(priority N)_` is the user's top five for the day, `1` first. It is optional
+ * in the strongest sense: a day where nothing was ranked carries the suffix
+ * nowhere and reads exactly as day files always have. Ranks are dense (`1…n`)
+ * across the *open* tasks and never sit on a completed one — see
+ * `normalizePriorities`, which is what closes the gap when a ranked task is
+ * finished.
+ *
+ * Both annotations are claims on a *shape* of trailing text, which a title can
+ * collide with: a task literally called "Bump the ticket to _(priority 3)_"
+ * parses as a rank and loses those words the moment the rank is dropped. The
+ * cost is accepted here as it already was for `_(added …)_` — the alternative
+ * is an escaping scheme in a file whose whole point is that a human can read
+ * and edit it — but note the asymmetry: an unwanted `_(added …)_` survives
+ * every app write, while a rank is released by an ordinary click on the star.
  *
  * ## `format`
  *
@@ -137,6 +152,15 @@ const NOTES_HEADING = '## Notes';
 
 /** A trailing `_(added 2026-07-30)_` — see the module doc. */
 const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
+/**
+ * A trailing `_(priority 2)_` — the user's top five for the day.
+ *
+ * Two digits at most. An unbounded `\d+` accepts a number that `String()`
+ * renders in exponent form on the way back out (`1e+21`), which this pattern
+ * then can't match — the annotation would be swallowed into the title and the
+ * round-trip identity would break. Nothing that long was a rank anyway.
+ */
+const PRIORITY_PATTERN = /\s*_\(priority (\d{1,2})\)_\s*$/;
 /** `- 10:15 — text`, accepting an em dash, en dash or hyphen as the separator. */
 const NOTE_PATTERN = /^\s*[-*]\s*(\d{1,2}:\d{2})\s*[—–-]\s*(.*)$/;
 
@@ -154,6 +178,65 @@ function parseFormatVersion(raw: string | undefined): number {
 
   const version = Number(raw);
   return Number.isInteger(version) && version >= 1 ? version : 1;
+}
+
+/** What a task line's trailing `_(…)_` annotations said. */
+interface Annotations {
+  title: string;
+  added?: DateKey;
+  priority?: number;
+}
+
+/**
+ * Peel the trailing annotations off a task title.
+ *
+ * They are written in a fixed order (`_(priority 1)_ _(added 2026-07-30)_`) but
+ * are peeled from whichever end they turn up on, because a hand edit is free to
+ * write them the other way round and losing a rank to key order would be a
+ * silent data loss in the one file that holds the data.
+ *
+ * A suffix with nothing in front of it is someone's prose, not an annotation,
+ * and stops the peeling: `- [ ] _(added 2026-07-30)_` is a line about a date,
+ * not a task with an empty title.
+ */
+function stripAnnotations(rawTitle: string): Annotations {
+  let title = rawTitle;
+  let added: DateKey | undefined;
+  let priority: number | undefined;
+
+  for (;;) {
+    const dateMatch = added === undefined ? ADDED_DATE_PATTERN.exec(title) : null;
+    if (dateMatch !== null) {
+      const annotated = dateMatch[1];
+      const stripped = title.slice(0, dateMatch.index).trim();
+      if (annotated === undefined || stripped === '') break;
+
+      added = annotated;
+      title = stripped;
+      continue;
+    }
+
+    const rankMatch = priority === undefined ? PRIORITY_PATTERN.exec(title) : null;
+    if (rankMatch !== null) {
+      const stripped = title.slice(0, rankMatch.index).trim();
+      const rank = Number(rankMatch[1]);
+      // `_(priority 0)_` is not a rank this format can mean anything by, so the
+      // text stays in the title rather than being swallowed.
+      if (stripped === '' || !Number.isInteger(rank) || rank < 1) break;
+
+      priority = rank;
+      title = stripped;
+      continue;
+    }
+
+    break;
+  }
+
+  return {
+    title,
+    ...(added === undefined ? {} : { added }),
+    ...(priority === undefined ? {} : { priority }),
+  };
 }
 
 /**
@@ -185,25 +268,16 @@ function parseTasks(
     if (firstItemAt === -1) firstItemAt = extra.length;
     if (baseIndent === -1) baseIndent = item.indent;
 
-    const status = item.status;
-    let title = item.text;
-
-    let added = date;
-    const dateMatch = ADDED_DATE_PATTERN.exec(title);
-    if (dateMatch !== null) {
-      const annotated = dateMatch[1];
-      const stripped = title.slice(0, dateMatch.index).trim();
-      // A suffix with nothing in front of it is someone's prose, not a task.
-      if (annotated !== undefined && stripped !== '') {
-        title = stripped;
-        added = annotated;
-      }
-    }
+    const { title, added, priority } = stripAnnotations(item.text);
 
     tasks.push({
       title,
-      status,
-      added,
+      status: item.status,
+      added: added ?? date,
+      // An out-of-range or duplicated rank from a hand edit is kept as written
+      // and tidied by `normalizePriorities` on the next edit, rather than being
+      // second-guessed here — parsing repairs nothing, it only reads.
+      ...(priority === undefined ? {} : { priority }),
       ...(item.marker === undefined ? {} : { marker: item.marker }),
     });
   });
@@ -314,8 +388,12 @@ export function serializeDay(day: DayDocument): string {
   const taskLines = day.tasks.map((task) => {
     // Only when it differs from this file's own date — see the module doc.
     const carried = task.added !== undefined && task.added !== day.date;
-    const suffix = carried ? ` _(added ${String(task.added)})_` : '';
-    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`, task.marker);
+    const added = carried ? ` _(added ${String(task.added)})_` : '';
+    const rank = task.priority === undefined ? '' : ` _(priority ${String(task.priority)})_`;
+    // Rank first, date last: the date suffix has been the trailing annotation
+    // since the format existed, and every reader — ours included — anchors on
+    // the end of the line to find it.
+    return renderTaskLine(task.status, `${task.title.trim()}${rank}${added}`, task.marker);
   });
   blocks.push(renderSection(TASKS_HEADING, taskLines, '_No tasks yet._', day.preserved.tasks));
 
