@@ -21,6 +21,16 @@ import {
   type Task,
 } from './tasks.ts';
 
+/**
+ * The task with this title, as an object — the mutators identify by reference,
+ * so a test has to hand back the element it is actually holding.
+ */
+function find(tasks: readonly Task[], title: string): Task {
+  const task = tasks.find((candidate) => candidate.title === title);
+  if (task === undefined) throw new Error(`no task titled ${title}`);
+  return task;
+}
+
 const TASKS: Task[] = [
   { title: 'Draft the RFC', status: 'upcoming' },
   { title: 'Ship the rollback', status: 'in-progress' },
@@ -138,16 +148,6 @@ describe('addTask', () => {
   });
 });
 
-/**
- * The task with this title, as an object — the mutators identify by reference,
- * so a test has to hand back the element it is actually holding.
- */
-function find(tasks: readonly Task[], title: string): Task {
-  const task = tasks.find((candidate) => candidate.title === title);
-  if (task === undefined) throw new Error(`no task titled ${title}`);
-  return task;
-}
-
 /** Two tasks a human would call the same thing, as a hand-edited file can hold. */
 const NEAR_DUPLICATES: Task[] = [
   { title: 'Ship it', status: 'upcoming' },
@@ -156,15 +156,13 @@ const NEAR_DUPLICATES: Task[] = [
 
 describe('setTaskStatus', () => {
   it('updates the given task only', () => {
-    const updated = setTaskStatus(TASKS, TASKS[0], 'completed');
+    const updated = setTaskStatus(TASKS, find(TASKS, 'Draft the RFC'), 'completed');
     expect(updated[0]?.status).toBe('completed');
     expect(updated[1]?.status).toBe('in-progress');
   });
 
   it('updates one of two tasks whose titles compare equal', () => {
-    // `sameTask` treats these as one, which is right for "don't add this
-    // twice" and wrong for "which row did the user click".
-    const updated = setTaskStatus(NEAR_DUPLICATES, NEAR_DUPLICATES[1], 'completed');
+    const updated = setTaskStatus(NEAR_DUPLICATES, find(NEAR_DUPLICATES, 'ship it'), 'completed');
 
     expect(updated.map((task) => task.status)).toEqual(['upcoming', 'completed']);
   });
@@ -174,23 +172,23 @@ describe('setTaskStatus', () => {
   });
 
   it('does not mutate the input', () => {
-    setTaskStatus(TASKS, TASKS[0], 'completed');
+    setTaskStatus(TASKS, find(TASKS, 'Draft the RFC'), 'completed');
     expect(TASKS[0]?.status).toBe('upcoming');
   });
 });
 
 describe('removeTask', () => {
   it('drops the given task', () => {
-    expect(removeTask(TASKS, TASKS[0]).map((task) => task.title)).toEqual([
+    expect(removeTask(TASKS, find(TASKS, 'Draft the RFC')).map((task) => task.title)).toEqual([
       'Ship the rollback',
       'Review the checklist',
     ]);
   });
 
   it('drops one of two tasks whose titles compare equal', () => {
-    expect(removeTask(NEAR_DUPLICATES, NEAR_DUPLICATES[0]).map((task) => task.title)).toEqual([
-      'ship it',
-    ]);
+    expect(
+      removeTask(NEAR_DUPLICATES, find(NEAR_DUPLICATES, 'Ship it')).map((task) => task.title),
+    ).toEqual(['ship it']);
   });
 
   it('is a no-op for a task that is not in the list', () => {
@@ -283,8 +281,8 @@ function ranks(tasks: readonly Task[]): [string, number | undefined][] {
 
 describe('togglePriority', () => {
   it('ranks in the order they are picked', () => {
-    let tasks = togglePriority(TASKS, 'Ship the rollback');
-    tasks = togglePriority(tasks, 'Draft the RFC');
+    let tasks = togglePriority(TASKS, find(TASKS, 'Ship the rollback'));
+    tasks = togglePriority(tasks, find(tasks, 'Draft the RFC'));
 
     expect(ranks(tasks)).toEqual([
       ['Draft the RFC', 2],
@@ -294,9 +292,9 @@ describe('togglePriority', () => {
   });
 
   it('unranks a ranked task and closes the gap', () => {
-    let tasks = togglePriority(TASKS, 'Ship the rollback');
-    tasks = togglePriority(tasks, 'Draft the RFC');
-    tasks = togglePriority(tasks, 'Ship the rollback');
+    let tasks = togglePriority(TASKS, find(TASKS, 'Ship the rollback'));
+    tasks = togglePriority(tasks, find(tasks, 'Draft the RFC'));
+    tasks = togglePriority(tasks, find(tasks, 'Ship the rollback'));
 
     expect(ranks(tasks)).toEqual([
       ['Draft the RFC', 1],
@@ -306,7 +304,7 @@ describe('togglePriority', () => {
   });
 
   it('leaves a day where nothing was ranked completely unannotated', () => {
-    const untouched = togglePriority(TASKS, 'Nothing by this name');
+    const untouched = togglePriority(TASKS, { title: 'Nothing by this name', status: 'upcoming' });
 
     expect(untouched).toEqual(TASKS);
     expect(untouched.every((task) => !('priority' in task))).toBe(true);
@@ -314,7 +312,7 @@ describe('togglePriority', () => {
 
   it('does not mutate the array it was given', () => {
     const before = structuredClone(TASKS);
-    togglePriority(TASKS, 'Draft the RFC');
+    togglePriority(TASKS, find(TASKS, 'Draft the RFC'));
 
     expect(TASKS).toEqual(before);
   });
@@ -325,7 +323,10 @@ describe('togglePriority', () => {
       status: 'upcoming',
     }));
 
-    const ranked = many.reduce<Task[]>((tasks, task) => togglePriority(tasks, task.title), many);
+    const ranked = many.reduce<Task[]>(
+      (tasks, task) => togglePriority(tasks, find(tasks, task.title)),
+      many,
+    );
 
     expect(prioritiesFull(ranked)).toBe(true);
     expect(priorityTasks(ranked).map((task) => task.title)).toEqual([
@@ -339,7 +340,7 @@ describe('togglePriority', () => {
   });
 
   it('will not rank completed work', () => {
-    const untouched = togglePriority(TASKS, 'Review the checklist');
+    const untouched = togglePriority(TASKS, find(TASKS, 'Review the checklist'));
 
     expect(untouched).toEqual(TASKS);
     // `toEqual` ignores an explicitly-undefined key, so assert the key's absence
@@ -362,14 +363,17 @@ describe('togglePriority', () => {
 
     expect(prioritiesFull(handEdited)).toBe(false);
     expect(priorityTasks(handEdited)).toEqual([]);
-    expect(ranks(togglePriority(handEdited, 'New work')).at(-1)).toEqual(['New work', 1]);
+    expect(ranks(togglePriority(handEdited, find(handEdited, 'New work'))).at(-1)).toEqual([
+      'New work',
+      1,
+    ]);
   });
 });
 
 describe('normalizePriorities', () => {
   it('promotes the rest when a ranked task is completed', () => {
-    let tasks = togglePriority(TASKS, 'Ship the rollback');
-    tasks = togglePriority(tasks, 'Draft the RFC');
+    let tasks = togglePriority(TASKS, find(TASKS, 'Ship the rollback'));
+    tasks = togglePriority(tasks, find(tasks, 'Draft the RFC'));
 
     const done = setTaskStatus(tasks, find(tasks, 'Ship the rollback'), 'completed');
 
@@ -381,8 +385,8 @@ describe('normalizePriorities', () => {
   });
 
   it('promotes the rest when a ranked task is removed', () => {
-    let tasks = togglePriority(TASKS, 'Ship the rollback');
-    tasks = togglePriority(tasks, 'Draft the RFC');
+    let tasks = togglePriority(TASKS, find(TASKS, 'Ship the rollback'));
+    tasks = togglePriority(tasks, find(tasks, 'Draft the RFC'));
 
     expect(ranks(removeTask(tasks, find(tasks, 'Ship the rollback')))).toEqual([
       ['Draft the RFC', 1],
@@ -436,8 +440,8 @@ describe('normalizePriorities', () => {
 
 describe('tasksForCheckIn with priorities', () => {
   it('leads with the ranked tasks in rank order', () => {
-    let tasks = togglePriority(TASKS, 'Draft the RFC');
-    tasks = togglePriority(tasks, 'Ship the rollback');
+    let tasks = togglePriority(TASKS, find(TASKS, 'Draft the RFC'));
+    tasks = togglePriority(tasks, find(tasks, 'Ship the rollback'));
 
     expect(tasksForCheckIn(tasks).map((task) => task.title)).toEqual([
       'Draft the RFC',
@@ -501,7 +505,8 @@ describe('movePriority', () => {
   }
 
   it('swaps a task with the one above it', () => {
-    expect(ranks(movePriority(ranked(), 'Review the checklist', 'up'))).toEqual([
+    const tasks = ranked();
+    expect(ranks(movePriority(tasks, find(tasks, 'Review the checklist'), 'up'))).toEqual([
       ['Ship the rollback', 1],
       ['Draft the RFC', 3],
       ['Review the checklist', 2],
@@ -510,7 +515,8 @@ describe('movePriority', () => {
   });
 
   it('swaps a task with the one below it', () => {
-    expect(ranks(movePriority(ranked(), 'Ship the rollback', 'down'))).toEqual([
+    const tasks = ranked();
+    expect(ranks(movePriority(tasks, find(tasks, 'Ship the rollback'), 'down'))).toEqual([
       ['Ship the rollback', 2],
       ['Draft the RFC', 1],
       ['Review the checklist', 3],
@@ -519,8 +525,11 @@ describe('movePriority', () => {
   });
 
   it('walks a task to the top with repeated moves', () => {
-    let tasks = movePriority(ranked(), 'Review the checklist', 'up');
-    tasks = movePriority(tasks, 'Review the checklist', 'up');
+    const start = ranked();
+    // Each move returns fresh objects, so the target is re-resolved each time —
+    // which is exactly what the controller does between renders.
+    let tasks = movePriority(start, find(start, 'Review the checklist'), 'up');
+    tasks = movePriority(tasks, find(tasks, 'Review the checklist'), 'up');
 
     expect(priorityTasks(tasks).map((task) => task.title)).toEqual([
       'Review the checklist',
@@ -530,59 +539,66 @@ describe('movePriority', () => {
   });
 
   it('does nothing at either end of the list', () => {
-    expect(movePriority(ranked(), 'Ship the rollback', 'up')).toEqual(ranked());
-    expect(movePriority(ranked(), 'Review the checklist', 'down')).toEqual(ranked());
+    const top = ranked();
+    const bottom = ranked();
+    expect(movePriority(top, find(top, 'Ship the rollback'), 'up')).toEqual(ranked());
+    expect(movePriority(bottom, find(bottom, 'Review the checklist'), 'down')).toEqual(ranked());
   });
 
-  it('does nothing for an unranked task', () => {
-    expect(movePriority(ranked(), 'Answer the survey', 'up')).toEqual(ranked());
-    expect(movePriority(ranked(), 'Nothing by this name', 'down')).toEqual(ranked());
+  it('does nothing for an unranked task, or one not in the list', () => {
+    const tasks = ranked();
+    expect(movePriority(tasks, find(tasks, 'Answer the survey'), 'up')).toEqual(ranked());
+    expect(
+      movePriority(tasks, { title: 'Nothing by this name', status: 'upcoming' }, 'down'),
+    ).toEqual(ranked());
   });
 
-  it('leaves the tasks it did not move alone', () => {
-    const moved = movePriority(ranked(), 'Draft the RFC', 'down');
-
-    expect(moved[0]).toEqual({ title: 'Ship the rollback', status: 'in-progress', priority: 1 });
-    expect(moved[3]).toEqual({ title: 'Answer the survey', status: 'upcoming' });
-  });
-
-  it('swaps by position, so two titles that compare equal keep distinct ranks', () => {
-    // `sameTask` ignores case, so a hand-edited file can hold two tasks one
-    // title matches. Re-mapping by title gave both the same new rank and lost
-    // the other one — and unlike the other mutators this result is written
-    // straight to the file.
+  it('moves the task it was handed, not the first one with that title', () => {
+    // The lookup has to resolve against the array the caller holds, *before*
+    // normalizing — normalize returns new objects for every rank it changes,
+    // so a reference lookup after it would silently do nothing.
     const collision: Task[] = [
       { title: 'Review PR', status: 'upcoming', priority: 1 },
       { title: 'review pr', status: 'upcoming', priority: 2 },
       { title: 'Other', status: 'upcoming', priority: 3 },
     ];
+    const second = collision[1];
 
-    expect(ranks(movePriority(collision, 'Review PR', 'down'))).toEqual([
-      ['Review PR', 2],
-      ['review pr', 1],
-      ['Other', 3],
+    expect(ranks(movePriority(collision, second, 'down'))).toEqual([
+      ['Review PR', 1],
+      ['review pr', 3],
+      ['Other', 2],
     ]);
   });
 
-  it('does not mutate the array it was given', () => {
-    const tasks = ranked();
-    const before = structuredClone(tasks);
-    movePriority(tasks, 'Draft the RFC', 'up');
-
-    expect(tasks).toEqual(before);
-  });
-
-  it('moves one place through the sparse ranks a hand edit can leave', () => {
+  it('still moves one place when the file arrived with sparse ranks', () => {
+    // The sparse case is where a stale reference would bite: every rank changes.
     const handEdited: Task[] = [
       { title: 'a', status: 'upcoming', priority: 2 },
       { title: 'b', status: 'upcoming', priority: 5 },
       { title: 'c', status: 'upcoming', priority: 9 },
     ];
 
-    expect(ranks(movePriority(handEdited, 'c', 'up'))).toEqual([
+    expect(ranks(movePriority(handEdited, handEdited[2], 'up'))).toEqual([
       ['a', 1],
       ['b', 3],
       ['c', 2],
     ]);
+  });
+
+  it('leaves the tasks it did not move alone', () => {
+    const tasks = ranked();
+    const moved = movePriority(tasks, find(tasks, 'Draft the RFC'), 'down');
+
+    expect(moved[0]).toEqual({ title: 'Ship the rollback', status: 'in-progress', priority: 1 });
+    expect(moved[3]).toEqual({ title: 'Answer the survey', status: 'upcoming' });
+  });
+
+  it('does not mutate the array it was given', () => {
+    const tasks = ranked();
+    const before = structuredClone(tasks);
+    movePriority(tasks, find(tasks, 'Draft the RFC'), 'up');
+
+    expect(tasks).toEqual(before);
   });
 });

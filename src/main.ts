@@ -1578,10 +1578,10 @@ class CheckInController {
         full: prioritiesFull(this.tasks()),
         ranked: priorityTasks(this.tasks()).length,
         onToggle: () => {
-          this.updateTasks(togglePriority(this.tasks(), task.title));
+          this.updateTasks(togglePriority(this.tasks(), task));
         },
         onMove: (direction) => {
-          this.updateTasks(movePriority(this.tasks(), task.title, direction));
+          this.updateTasks(movePriority(this.tasks(), task, direction));
         },
       },
     });

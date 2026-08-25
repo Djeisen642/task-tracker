@@ -188,13 +188,16 @@ export function normalizePriorities(tasks: readonly Task[]): Task[] {
  * the same list with one click each, and the remaining ranks close up when one
  * leaves. A full list is a no-op rather than a silent eviction of number five.
  */
-export function togglePriority(tasks: readonly Task[], title: string): Task[] {
-  const target = tasks.find((task) => sameTask(task.title, title));
-  if (target === undefined) return [...tasks];
+export function togglePriority(tasks: readonly Task[], target: Task): Task[] {
+  // By reference, for the same reason `setTaskStatus` is. Looking the target up
+  // by title starred *both* of two rows a human would call the same thing —
+  // and, because both then took the same next rank, one click quietly consumed
+  // two of the five slots.
+  if (!tasks.includes(target)) return [...tasks];
 
   if (target.priority !== undefined) {
     return normalizePriorities(
-      tasks.map((task) => (sameTask(task.title, title) ? withoutPriority(task) : task)),
+      tasks.map((task) => (task === target ? withoutPriority(task) : task)),
     );
   }
 
@@ -203,7 +206,7 @@ export function togglePriority(tasks: readonly Task[], title: string): Task[] {
 
   const last = tasks.reduce((highest, task) => Math.max(highest, task.priority ?? 0), 0);
   return normalizePriorities(
-    tasks.map((task) => (sameTask(task.title, title) ? { ...task, priority: last + 1 } : task)),
+    tasks.map((task) => (task === target ? { ...task, priority: last + 1 } : task)),
   );
 }
 
@@ -222,15 +225,22 @@ export type PriorityMove = 'up' | 'down';
  */
 export function movePriority(
   tasks: readonly Task[],
-  title: string,
+  target: Task,
   direction: PriorityMove,
 ): Task[] {
+  // Resolved against the array the caller handed us, *before* normalizing:
+  // `normalizePriorities` returns a new object for every task whose rank it
+  // changes, so by the time it has run the caller's reference is stale for
+  // exactly the tasks being renumbered — and a reference lookup after it would
+  // silently do nothing. The index survives, because normalize is a `map`.
+  const at = tasks.indexOf(target);
+
   // Normalize first so "one place" is meaningful even if the file arrived with
   // ranks like 2, 5, 9 from a hand edit.
   const normalized = normalizePriorities(tasks);
   const ranked = rankedEntries(normalized);
 
-  const from = ranked.findIndex(({ task }) => sameTask(task.title, title));
+  const from = at === -1 ? -1 : ranked.findIndex((entry) => entry.index === at);
   const to = from + (direction === 'up' ? -1 : 1);
   if (from === -1 || to < 0 || to >= ranked.length) return normalized;
 
@@ -238,9 +248,9 @@ export function movePriority(
   const displaced = ranked[to];
   if (moved === undefined || displaced === undefined) return normalized;
 
-  // Swapped by position, not by title: two tasks whose titles `sameTask` treats
-  // as one (a hand-edited "Review PR" and "review pr") would otherwise both take
-  // the same new rank and quietly delete the other one from the ranking.
+  // Swapped by position: two tasks whose titles `sameTask` treats as one (a
+  // hand-edited "Review PR" and "review pr") would otherwise both take the same
+  // new rank and quietly delete the other one from the ranking.
   return normalized.map((task, index) => {
     if (index === moved.index) return { ...task, priority: displaced.task.priority };
     if (index === displaced.index) return { ...task, priority: moved.task.priority };

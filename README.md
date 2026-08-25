@@ -1,8 +1,8 @@
 # Task Tracker
 
-An ultra-lightweight Windows tray utility that asks, once an hour, what you're
-working on — and writes the answers to a folder of plain Markdown you can hand to
-an AI agent.
+An ultra-lightweight tray utility — Windows tray, macOS menu bar, Linux panel —
+that asks, once an hour, what you're working on, and writes the answers to a
+folder of plain Markdown you can hand to an AI agent.
 
 At **work start** it shows the day's list, seeded with whatever you didn't finish
 yesterday. **Every hour** it slides in from the top-left to collect updates. At
@@ -134,9 +134,9 @@ node --experimental-strip-types scripts/backfill-provenance.ts "$HOME/Documents/
 node --experimental-strip-types scripts/backfill-provenance.ts "$HOME/Documents/TaskTracker" --write
 ```
 
-On Windows the vault is `%USERPROFILE%\Documents\TaskTracker`, or whatever
-`vaultDir` points at. Running it twice is safe — the second pass reports nothing
-to do.
+The vault is `%USERPROFILE%\Documents\TaskTracker` on Windows and
+`~/Documents/TaskTracker` on macOS and Linux, or wherever `vaultDir` points.
+Running it twice is safe — the second pass reports nothing to do.
 
 Two things to expect in the diff:
 
@@ -160,6 +160,24 @@ pnpm install          # deps + git hooks
 pnpm run dev          # browser preview of the card — no Rust needed
 pnpm run tauri dev    # the real desktop app (needs the Rust toolchain)
 ```
+
+On Linux, the webview and tray come from system libraries rather than the
+bundle, so they have to be there before Rust will even compile:
+
+```bash
+sudo apt-get update && sudo apt-get install -y \
+  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+  librsvg2-dev libsoup-3.0-dev libxdo-dev libssl-dev libdbus-1-dev \
+  build-essential pkg-config file curl wget xdg-utils
+```
+
+`xdg-utils` is only needed to _bundle_ an AppImage — the bundler copies
+`/usr/bin/xdg-open` into the image — but it fails at the very end, after the
+release compile, so it is easier to install up front than to discover.
+
+Windows and macOS need no equivalent: WebView2 ships with Windows 11, and the
+macOS webview is WebKit. macOS additionally needs the Xcode command line tools
+(`xcode-select --install`), which you likely already have if Rust works.
 
 Settings are edited from the **gear on the check-in card** or **Settings…** in
 the tray, and persist to `settings.json` in the app config directory:
@@ -258,6 +276,39 @@ screenshot has already caught a wrong prompt that no assertion did.
 What e2e cannot cover: the tray, window positioning, transparency,
 launch-at-login, and Windows focus behavior. Those need real hardware.
 
+## Building installers
+
+```bash
+pnpm run tauri build                                  # for the machine you're on
+pnpm run tauri build --target universal-apple-darwin  # one macOS build for both chips
+```
+
+Each OS produces its own installers, into `src-tauri/target/release/bundle`
+(`target/universal-apple-darwin/release/bundle` for the universal Mac build):
+
+| Platform | Artifacts                                                      |
+| -------- | -------------------------------------------------------------- |
+| Windows  | `.msi` and an NSIS `.exe`                                      |
+| macOS    | `.app` and a `.dmg` — universal, so one download runs anywhere |
+| Linux    | `.deb`, `.rpm` and an `.AppImage`                              |
+
+There is no cross-compiling: a Windows installer is built on Windows, a `.dmg`
+on macOS. Building all three for a release means running the command above on
+one machine of each OS (or three CI runners, if that gets set up later).
+
+### Installing an unsigned build
+
+Nothing here is code-signed or notarized, and each OS says so in its own way:
+
+- **macOS** refuses a quarantined app outright. Right-click → **Open**, or
+  `xattr -dr com.apple.quarantine "/Applications/Task Tracker.app"`.
+- **Windows** SmartScreen shows "Windows protected your PC" → **More info** →
+  **Run anyway**.
+- **Linux** doesn't care; `chmod +x` the AppImage.
+
+Signing both desktop platforms — and the auto-update channel that wants the same
+keys — is on the list in [`docs/future-work.md`](docs/future-work.md).
+
 ## Stack
 
 Tauri v2, vanilla TypeScript, Vite. No UI framework, on purpose — the app runs
@@ -268,7 +319,7 @@ runs format, lint, typecheck and tests; `pnpm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (554 unit tests plus 104 end-to-end
+Pre-v0.1. The web layer is built and tested (554 unit tests plus 106 end-to-end
 tests driving the real card in a browser), and the Rust layer compiles clean —
 `cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
 all pass.
@@ -277,11 +328,18 @@ Everything above the MVP line in [`docs/future-work.md`](docs/future-work.md) is
 built: the check-in loop, the vault and its rollups, the settings panel, manager
 mode, and the tray.
 
-What has **never run** is the app itself on a Windows desktop. That is the only
-thing standing between this and v0.1. See "Known unknowns" for what needs
-verifying on real hardware, starting with whether the card can take keyboard
-focus under Windows' foreground-activation rules — the one open question that
-could force a design change.
+It **bundles for Windows, macOS and Linux** — the code was portable already, and
+the packaging now says so. Nothing in it is Windows-only: the shell is Tauri v2,
+the vault path resolves per-platform, and the two places that do differ (the
+Dock-less menu-bar app on macOS, transparency needing the macOS private-API
+flag) are handled.
+
+What has **never run** is the app itself on any desktop. That is the only thing
+standing between this and v0.1. See "Known unknowns" for what needs verifying on
+real hardware, starting with whether the card can take keyboard focus under
+Windows' foreground-activation rules — the one open question that could force a
+design change — and, on macOS and Linux, whether the tray icon and the
+transparent card look right rather than merely appear.
 
 ## License
 
