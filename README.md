@@ -259,7 +259,7 @@ runs format, lint, typecheck and tests; `pnpm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (500 unit tests plus 99 end-to-end
+Pre-v0.1. The web layer is built and tested (501 unit tests plus 101 end-to-end
 tests driving the real card in a browser), and the Rust layer compiles clean —
 `cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
 all pass.
