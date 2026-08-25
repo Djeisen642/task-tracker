@@ -97,8 +97,10 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit --all --message "Release v$VERSION"
           git tag --annotate "v$VERSION" --message "v$VERSION"
-          git push origin main
-          git push origin "v$VERSION"
+          # Atomic: a branch that moved without its tag would leave the next run
+          # computing its bump from the previous tag and releasing the same work
+          # twice.
+          git push --atomic origin main "refs/tags/v$VERSION"
 
       - name: Publish the GitHub release
         if: steps.next.outputs.version != ''
