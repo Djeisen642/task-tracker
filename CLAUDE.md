@@ -88,7 +88,10 @@ src/
     tauri.ts             # Optional native bridge; degrades gracefully in a browser
     markdown/
       frontmatter.ts(.test)  # Tiny scalar-only YAML frontmatter reader/writer
+      sections.ts(.test)     # Owned-vs-unowned section split; what a write preserves
+      task-line.ts(.test)    # The checkbox grammar both file formats share
       day.ts(.test)          # The day file: parse/serialize, preserves hand edits
+      team.ts(.test)         # team.<person>.md: one running file per report
       mentions.ts(.test)     # @person / #tag extraction
       rollup.ts(.test)       # Standup summary + weekly rollup
       context-doc.ts         # CONTEXT.md — the schema guide for agents
@@ -170,6 +173,13 @@ docs/
   in `DayDocument.preserved` / `TeamMemberDocument.preserved` and are re-emitted
   below the items — the content is the guarantee, its exact line number is not.
   Anything new that reads a section must keep what it doesn't model.
+- **The grammar the two formats share lives in one module each.**
+  `task-line.ts` holds the checkbox grammar and `sections.ts` the section split,
+  because a day file and a team file are supposed to agree about both and had
+  each grown their own identical copy. Adding a marker or a bullet shape means
+  editing one file, not two that drift. What stays per-format is what genuinely
+  differs: the day file's `_(added …)_` provenance, the team file's `_(date)_`
+  completion stamp, and their different note stamps (`HH:MM` vs `YYYY-MM-DD`).
 - **Read the file the way people write it, not the way the app writes it.** A
   task line is any bullet — `-`, `*`, `+`, or `1.` — with the checkbox
   _optional_, and an unrecognized marker (`[-]`, `[>]`) reads as upcoming rather

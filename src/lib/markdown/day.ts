@@ -60,16 +60,15 @@
  */
 
 import { describeDate, fromDateKey, parseClock, type Clock, type DateKey } from '../dates.ts';
-import type { Task, TaskStatus } from '../tasks.ts';
+import type { Task } from '../tasks.ts';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
+import { parseTaskLine, renderTaskLine } from './task-line.ts';
 import {
   emptyPreserved,
-  isHeading,
   isPlaceholder,
   preservedLines,
-  preservedPreamble,
   renderSection,
-  splitSections,
+  splitOwnedSections,
   trimBlankEdges,
   type ExtraSection,
   type PreservedLines,
@@ -135,30 +134,6 @@ export interface DayDocument {
 const TASKS_HEADING = '## Tasks';
 const NOTES_HEADING = '## Notes';
 
-/** Checkbox marker ↔ status. `/` for in-progress follows the Obsidian Tasks convention. */
-const MARKER_TO_STATUS: Record<string, TaskStatus> = {
-  ' ': 'upcoming',
-  '/': 'in-progress',
-  x: 'completed',
-  X: 'completed',
-};
-
-const STATUS_TO_MARKER: Record<TaskStatus, string> = {
-  upcoming: ' ',
-  'in-progress': '/',
-  completed: 'x',
-};
-
-/**
- * A task line: any bullet, with the checkbox optional.
- *
- * Deliberately loose. A file this app writes always has `- [ ]`, but a file a
- * human or an agent edited often has `- Ship the thing` or a numbered list.
- * Requiring the checkbox meant those lines were not tasks, so they never
- * appeared in the app — and the next write, which re-emits the section from
- * the parsed tasks, deleted them from the only copy.
- */
-const TASK_PATTERN = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[(.)\]\s*)?(.*)$/;
 /** A trailing `_(added 2026-07-30)_` — see the module doc. */
 const ADDED_DATE_PATTERN = /\s*_\(added (\d{4}-\d{2}-\d{2})\)_\s*$/;
 /** `- 10:15 — text`, accepting an em dash, en dash or hyphen as the separator. */
@@ -190,18 +165,15 @@ function parseTasks(lines: readonly string[], date: DateKey): { tasks: Task[]; e
   const extra: string[] = [];
 
   for (const line of lines) {
-    const match = TASK_PATTERN.exec(line);
-    let title = (match?.[2] ?? '').trim();
-    if (match === null || title === '') {
+    const item = parseTaskLine(line);
+    if (item === null) {
       // Not an item: a paragraph, a `###` subheading, a table. Keep it.
       if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
 
-    // An unrecognized marker (`[-]`, `[>]`, whatever convention the writer
-    // brought with them) is still a task. Reading it as upcoming loses a shade
-    // of meaning; not reading it at all lost the line.
-    const status = MARKER_TO_STATUS[match[1] ?? ' '] ?? 'upcoming';
+    const status = item.status;
+    let title = item.text;
 
     let added = date;
     const dateMatch = ADDED_DATE_PATTERN.exec(title);
@@ -252,7 +224,10 @@ export function parseDay(
   fallback: { date: DateKey; workStart: Clock; workEnd: Clock },
 ): DayDocument {
   const { fields, body } = parseFrontmatter(source);
-  const { preamble, sections } = splitSections(body);
+  const { owned, preamble, extraSections } = splitOwnedSections(body, [
+    TASKS_HEADING,
+    NOTES_HEADING,
+  ]);
 
   const extraFields: Record<string, string> = {};
   for (const [key, value] of Object.entries(fields)) {
@@ -261,34 +236,13 @@ export function parseDay(
 
   const date = fields.date ?? fallback.date;
 
-  let tasks: Task[] = [];
-  let notes: Note[] = [];
-  const preserved = emptyPreserved();
-  const extraSections: ExtraSection[] = [];
-  let seenTasks = false;
-  let seenNotes = false;
-
-  // Anything above the first `##` heading, minus the title the app writes.
-  preserved.preamble = preservedPreamble(preamble);
-
-  for (const section of sections) {
-    // Case-insensitively, so a hand-written `## tasks` is the tasks section
-    // rather than somebody else's. A second section of the same name is left
-    // alone rather than silently replacing the first.
-    if (isHeading(section.heading, TASKS_HEADING) && !seenTasks) {
-      seenTasks = true;
-      const parsed = parseTasks(section.lines, date);
-      tasks = parsed.tasks;
-      preserved.tasks = preservedLines(parsed.extra);
-    } else if (isHeading(section.heading, NOTES_HEADING) && !seenNotes) {
-      seenNotes = true;
-      const parsed = parseNotes(section.lines);
-      notes = parsed.notes;
-      preserved.notes = preservedLines(parsed.extra);
-    } else {
-      extraSections.push({ heading: section.heading, lines: [...section.lines] });
-    }
-  }
+  const parsedTasks = parseTasks(owned.get(TASKS_HEADING) ?? [], date);
+  const parsedNotes = parseNotes(owned.get(NOTES_HEADING) ?? []);
+  const preserved: PreservedLines = {
+    preamble,
+    tasks: preservedLines(parsedTasks.extra),
+    notes: preservedLines(parsedNotes.extra),
+  };
 
   // A malformed hand-edited value is dropped rather than trusted: a bad slot key
   // would suppress check-ins for the rest of the day, which fails silently.
@@ -302,8 +256,8 @@ export function parseDay(
     workStart: fields.work_start ?? fallback.workStart,
     workEnd: fields.work_end ?? fallback.workEnd,
     ...(validLastCheckIn === undefined ? {} : { lastCheckIn: validLastCheckIn }),
-    tasks,
-    notes,
+    tasks: parsedTasks.tasks,
+    notes: parsedNotes.notes,
     extraFields,
     extraSections,
     preserved,
@@ -335,7 +289,7 @@ export function serializeDay(day: DayDocument): string {
     // Only when it differs from this file's own date — see the module doc.
     const carried = task.added !== undefined && task.added !== day.date;
     const suffix = carried ? ` _(added ${String(task.added)})_` : '';
-    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
+    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`);
   });
   blocks.push(renderSection(TASKS_HEADING, taskLines, '_No tasks yet._', day.preserved.tasks));
 

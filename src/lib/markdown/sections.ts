@@ -79,7 +79,7 @@ export function preservedLines(lines: readonly string[]): string[] {
  * appends a second copy each time the file is saved — the round-trip test
  * caught exactly that. Anything else up there is the writer's own.
  */
-export function preservedPreamble(lines: readonly string[]): string[] {
+function preservedPreamble(lines: readonly string[]): string[] {
   let titleSeen = false;
   const kept: string[] = [];
 
@@ -102,7 +102,7 @@ export function preservedPreamble(lines: readonly string[]): string[] {
  * at all and quietly treated the whole section as somebody else's, so the
  * entries sat in the file, invisible in the app.
  */
-export function isHeading(heading: string, canonical: string): boolean {
+function isHeading(heading: string, canonical: string): boolean {
   return heading.trim().toLowerCase().replace(/:$/, '') === canonical.toLowerCase();
 }
 
@@ -132,6 +132,42 @@ export function splitSections(body: string): { preamble: string[]; sections: Sec
   }
 
   return { preamble, sections };
+}
+
+/** A body split into the sections a format owns and everything else. */
+export interface OwnedBody {
+  /** Lines under each requested heading, keyed by it. Absent heading → empty. */
+  owned: Map<string, string[]>;
+  /** Above the first `##`, already stripped of the title and placeholders. */
+  preamble: string[];
+  /** Sections the format doesn't own, in file order. */
+  extraSections: ExtraSection[];
+}
+
+/**
+ * Split a body into the sections a format owns and everything else.
+ *
+ * Both formats need the same three rules, and had them written out twice: match
+ * a heading case-insensitively (a hand-written `## tasks` is the tasks
+ * section), let the *first* section of a name win, and treat everything else —
+ * including a second `## Tasks` somebody added — as an unowned section to
+ * preserve rather than as a replacement.
+ */
+export function splitOwnedSections(body: string, headings: readonly string[]): OwnedBody {
+  const { preamble, sections } = splitSections(body);
+  const owned = new Map<string, string[]>();
+  const extraSections: ExtraSection[] = [];
+
+  for (const section of sections) {
+    const match = headings.find((heading) => isHeading(section.heading, heading));
+    if (match !== undefined && !owned.has(match)) {
+      owned.set(match, [...section.lines]);
+    } else {
+      extraSections.push({ heading: section.heading, lines: [...section.lines] });
+    }
+  }
+
+  return { owned, preamble: preservedPreamble(preamble), extraSections };
 }
 
 /**

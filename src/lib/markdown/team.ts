@@ -39,16 +39,15 @@
  */
 
 import type { DateKey } from '../dates.ts';
-import type { Task, TaskStatus } from '../tasks.ts';
+import type { Task } from '../tasks.ts';
 import { parseFrontmatter, serializeFrontmatter } from './frontmatter.ts';
+import { parseTaskLine, renderTaskLine } from './task-line.ts';
 import {
   emptyPreserved,
-  isHeading,
   isPlaceholder,
   preservedLines,
-  preservedPreamble,
   renderSection,
-  splitSections,
+  splitOwnedSections,
   trimBlankEdges,
   type ExtraSection,
   type PreservedLines,
@@ -87,30 +86,6 @@ export interface TeamMemberDocument {
 const TASKS_HEADING = '## Tasks';
 const NOTES_HEADING = '## Notes';
 
-/** Checkbox marker ↔ status. Mirrors the day file's convention exactly. */
-const MARKER_TO_STATUS: Record<string, TaskStatus> = {
-  ' ': 'upcoming',
-  '/': 'in-progress',
-  x: 'completed',
-  X: 'completed',
-};
-
-const STATUS_TO_MARKER: Record<TaskStatus, string> = {
-  upcoming: ' ',
-  'in-progress': '/',
-  completed: 'x',
-};
-
-/**
- * A task line: any bullet, with the checkbox optional.
- *
- * Deliberately loose. A manager typing into this file by hand — or an agent
- * asked to "add a task for greg" — writes `- Ship the migration` as often as
- * `- [ ] Ship the migration`, and a numbered list about as often as a dashed
- * one. Requiring the checkbox meant those lines were not tasks, so the app
- * showed nothing and then deleted them on its next write.
- */
-const TASK_PATTERN = /^\s*(?:[-*+]|\d+[.)])\s+(?:\[(.)\]\s*)?(.*)$/;
 /** A trailing `_(2026-08-03)_` on a completed task line — see the module doc. */
 const COMPLETED_DATE_PATTERN = /\s*_\((\d{4}-\d{2}-\d{2})\)_\s*$/;
 /** `- 2026-08-10 — text`, accepting an em dash, en dash or hyphen as the separator. */
@@ -129,18 +104,15 @@ function parseTasks(lines: readonly string[]): {
   const extra: string[] = [];
 
   for (const line of lines) {
-    const match = TASK_PATTERN.exec(line);
-    let title = (match?.[2] ?? '').trim();
-    if (match === null || title === '') {
+    const item = parseTaskLine(line);
+    if (item === null) {
       // Not an item: a paragraph, a `###` subheading, a table. Keep it.
       if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
 
-    // An unrecognized marker (`[-]`, `[>]`, whatever convention the writer
-    // brought with them) is still a task. Showing it as upcoming loses the
-    // shade of meaning; not showing it at all lost the line.
-    const status = MARKER_TO_STATUS[match[1] ?? ' '] ?? 'upcoming';
+    const status = item.status;
+    let title = item.text;
 
     if (status === 'completed') {
       const dateMatch = COMPLETED_DATE_PATTERN.exec(title);
@@ -185,53 +157,31 @@ function parseNotes(lines: readonly string[]): { notes: TeamNote[]; extra: strin
  */
 export function parseTeamMember(source: string, fallback: { person: string }): TeamMemberDocument {
   const { fields, body } = parseFrontmatter(source);
-  const { preamble, sections } = splitSections(body);
+  const { owned, preamble, extraSections } = splitOwnedSections(body, [
+    TASKS_HEADING,
+    NOTES_HEADING,
+  ]);
 
   const extraFields: Record<string, string> = {};
   for (const [key, value] of Object.entries(fields)) {
     if (!OWNED_FIELDS.includes(key)) extraFields[key] = value;
   }
 
-  let tasks: Task[] = [];
-  let completedDates: Record<string, DateKey> = {};
-  let notes: TeamNote[] = [];
-  const preserved = emptyPreserved();
-  const extraSections: ExtraSection[] = [];
-  let seenTasks = false;
-  let seenNotes = false;
-
-  // Anything above the first `##` heading. The app never writes here, so this
-  // is always somebody's own words — and it used to be dropped on every write.
-  preserved.preamble = preservedPreamble(preamble);
-
-  for (const section of sections) {
-    // Case-insensitively: `## tasks` is the tasks section. A second section of
-    // the same name is somebody's own structure and is preserved as-is rather
-    // than silently replacing the first.
-    if (isHeading(section.heading, TASKS_HEADING) && !seenTasks) {
-      seenTasks = true;
-      const parsed = parseTasks(section.lines);
-      tasks = parsed.tasks;
-      completedDates = parsed.completedDates;
-      preserved.tasks = preservedLines(parsed.extra);
-    } else if (isHeading(section.heading, NOTES_HEADING) && !seenNotes) {
-      seenNotes = true;
-      const parsed = parseNotes(section.lines);
-      notes = parsed.notes;
-      preserved.notes = preservedLines(parsed.extra);
-    } else {
-      extraSections.push({ heading: section.heading, lines: [...section.lines] });
-    }
-  }
+  const parsedTasks = parseTasks(owned.get(TASKS_HEADING) ?? []);
+  const parsedNotes = parseNotes(owned.get(NOTES_HEADING) ?? []);
 
   return {
     person: fields.person ?? fallback.person,
-    tasks,
-    completedDates,
-    notes,
+    tasks: parsedTasks.tasks,
+    completedDates: parsedTasks.completedDates,
+    notes: parsedNotes.notes,
     extraFields,
     extraSections,
-    preserved,
+    preserved: {
+      preamble,
+      tasks: preservedLines(parsedTasks.extra),
+      notes: preservedLines(parsedNotes.extra),
+    },
   };
 }
 
@@ -249,7 +199,7 @@ export function serializeTeamMember(member: TeamMemberDocument): string {
   const taskLines = member.tasks.map((task) => {
     const date = task.status === 'completed' ? member.completedDates[task.title] : undefined;
     const suffix = date === undefined ? '' : ` _(${date})_`;
-    return `- [${STATUS_TO_MARKER[task.status]}] ${task.title.trim()}${suffix}`;
+    return renderTaskLine(task.status, `${task.title.trim()}${suffix}`);
   });
   blocks.push(renderSection(TASKS_HEADING, taskLines, '_Nothing tracked yet._', preserved.tasks));
 
