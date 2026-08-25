@@ -250,13 +250,13 @@ docs/
   Windows build says a word. The pair is enabled — keep them together. (It also
   means the app can't ship on the Mac App Store, which is fine: it's a direct
   download.)
-- **Installers are built per-OS, never cross-compiled.**
-  `.github/workflows/desktop-build.yml` fans `tauri build` out across
-  windows/macos/ubuntu runners; the Mac job builds
-  `--target universal-apple-darwin` so one `.dmg` covers both chips. It runs on
-  demand, on `v*` tags, and on PRs touching `src-tauri/` — so if you change
-  packaging, that PR's run is your evidence, and the sandbox can't stand in for
-  it.
+- **Installers are built per-OS, never cross-compiled.** `tauri build` on a
+  Windows machine makes an `.msi`/`.exe`; on macOS, the universal-target flag
+  from the README makes one `.dmg` covering both chips; this sandbox can
+  prove the Linux `.deb`/`.rpm`/`.AppImage` and nothing else. There is no CI
+  job doing this — a change to packaging needs a manual build on the
+  platform it touches, since the sandbox can't stand in for one it doesn't
+  have.
 - **Filenames are validated in Rust.** `is_safe_name` in `src-tauri/src/vault.rs`
   is the security boundary; the TypeScript `isSafeVaultName` is an early-failure
   convenience. Keep both in sync, and never widen the Rust one to a general path.

@@ -259,13 +259,9 @@ Each OS produces its own installers, into `src-tauri/target/release/bundle`
 | macOS    | `.app` and a `.dmg` — universal, so one download runs anywhere |
 | Linux    | `.deb`, `.rpm` and an `.AppImage`                              |
 
-There is no cross-compiling: a Windows installer is built on Windows, a `.dmg` on
-macOS. That is what
-[`.github/workflows/desktop-build.yml`](.github/workflows/desktop-build.yml) is
-for — it runs the three in parallel on GitHub's runners and uploads the
-installers as artifacts. Trigger it from the Actions tab, or push a `v*` tag; it
-also runs on pull requests that touch `src-tauri/`, so a change that breaks
-packaging on a platform you don't own fails before it lands.
+There is no cross-compiling: a Windows installer is built on Windows, a `.dmg`
+on macOS. Building all three for a release means running the command above on
+one machine of each OS (or three CI runners, if that gets set up later).
 
 ### Installing an unsigned build
 

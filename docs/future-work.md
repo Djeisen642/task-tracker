@@ -227,11 +227,14 @@ could not, which is why provenance got built and the rest of this list didn't.
   installer, a notarized macOS `.dmg`, and the update endpoint that wants the
   same keys. Until then every platform greets the download with a warning
   (README, "Installing an unsigned build").
-- macOS and Linux polish. They _bundle_ — `desktop-build.yml` produces a
-  universal `.dmg` and deb/rpm/AppImage alongside the Windows installers — but
-  the tray icon is the same colour art on all three, where the macOS menu bar
-  wants a template image that follows the light/dark bar. Decide that with a
-  real menu bar in front of you, not from the docs.
+- macOS and Linux polish. `pnpm run tauri build` (universal-target flag on
+  macOS, see README) now produces a `.dmg` and deb/rpm/AppImage alongside the
+  Windows installers — but the tray icon is the same colour art on all
+  three, where the macOS menu bar wants a template image that follows the
+  light/dark bar. Decide that with a real menu bar in front of you, not from
+  the docs.
+- A CI job that actually builds the three installers, so a packaging change
+  fails before it lands instead of on the next manual build.
 - Coverage thresholds in CI.
 
 ---
