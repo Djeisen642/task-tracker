@@ -17,16 +17,17 @@ These ship in v0.1. The app is not usable without them.
 
 ### The check-in loop
 
-| Status | Item                                                                                                                                                      |
-| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                                     |
-| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                                    |
-| done   | Work start / end times, configurable working days (`workDays`), hourly nudges toggleable.                                                                 |
-| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                                        |
-| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                                   |
-| done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in.          |
-| done   | The first check-in of a day is always the day-start prompt, whatever the hour — a late start or a machine that was off at 09:00 still gets shown the day. |
-| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.                                                                        |
+| Status | Item                                                                                                                                                                                                        |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| done   | Slot-based scheduler: day-start, hourly, day-end; coalesces missed slots after sleep.                                                                                                                       |
+| done   | Prompt repeats until dismissed or submitted; Snooze defers by a configurable interval.                                                                                                                      |
+| done   | Work start / end times, configurable working days (`workDays`), hourly nudges toggleable.                                                                                                                   |
+| done   | Card slides in from the **top-left** (bottom-right belongs to the calendar alert).                                                                                                                          |
+| done   | Keyboard-first: type a task, Enter to add; Esc snoozes.                                                                                                                                                     |
+| done   | Survives a restart: the handled slot is recorded in the day file and restored on launch, so a reboot doesn't re-prompt for a completed check-in.                                                            |
+| done   | The first check-in of a day is always the day-start prompt, whatever the hour — a late start or a machine that was off at 09:00 still gets shown the day.                                                   |
+| done   | An optional top five: star up to five tasks to rank them, reorder with ▲▼ or Alt+↑/↓, and the ranks compact as work is completed. Written as `_(priority N)_`, absent entirely on a day nothing was ranked. |
+| todo   | **Verify the window actually takes focus on Windows.** See "Known unknowns" below.                                                                                                                          |
 
 ### The vault
 
@@ -202,11 +203,27 @@ questions to ask of `team.<person>.md`, not screens to build.
 
 ## Task model
 
-Title, status, and the date it first appeared. Candidates, each weighed against
-the friction it adds to a prompt seen eight times a day — and now against a
-second test: **does an agent reading the folder need this stated, or can it
-infer it from the notes?** Grouping and priority it can infer. Elapsed time it
-could not, which is why provenance got built and the rest of this list didn't.
+Title, status, the date it first appeared, and an optional rank. Candidates,
+each weighed against the friction it adds to a prompt seen eight times a day —
+and now against a second test: **does an agent reading the folder need this
+stated, or can it infer it from the notes?** Grouping it can infer. Elapsed time
+it could not, which is why provenance got built.
+
+Ranking was on the wrong side of that test until we looked again: an agent can
+infer what _took_ the most time, but not what the user _decided_ mattered that
+morning, and those come apart precisely on the days worth reviewing. That makes
+it capture, not analysis — so `_(priority N)_` shipped, with the cost kept at
+one click and nothing written on a day nobody ranked. What a _single_
+file can't tell you is which priorities were met: a completed task releases its
+rank, so the file says what was outstanding at the end, not what was promised at
+the start. Most of that is recoverable across files — ranks carry forward, so
+yesterday's file is the ranking today opened with, and anything on it marked
+`[x]` today is a priority that got done. What is genuinely unrecoverable is
+narrower: work ranked and finished within the same day leaves no trace of having
+been ranked. Closing that would mean a rank that outlives its task, which is a
+second, contradictory number on the same line — deferred until there's evidence
+the question gets asked. `CONTEXT.md` documents the cross-file method, so an
+agent doesn't attempt the within-file comparison that cannot work.
 
 - Projects or tags for grouping. `#tag` already exists in notes and costs
   nothing; a first-class field has to beat that.

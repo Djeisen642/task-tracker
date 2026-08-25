@@ -386,3 +386,41 @@ describe('teamWeekBriefing', () => {
     expect(teamWeekBriefing([], weekStart, weekEnd)).toBeNull();
   });
 });
+
+describe('priority ordering in derived views', () => {
+  const ranked = day('2026-08-04', [
+    { title: 'Answer the survey', status: 'upcoming' },
+    { title: 'Draft the RFC', status: 'upcoming', priority: 2 },
+    { title: 'Ship the rollback', status: 'in-progress', priority: 1 },
+  ]);
+
+  it("leads the standup's today list with the ranked work, in order", () => {
+    const todaySection = standupSummary(ranked, null).split('Today:')[1] ?? '';
+
+    expect(todaySection.trim().split('\n')).toEqual([
+      '- Ship the rollback',
+      '- Draft the RFC',
+      '- Answer the survey',
+    ]);
+  });
+
+  it("leads the weekly rollup's still-open list the same way", () => {
+    const openSection = weeklyRollup([ranked]).split('## Still open')[1] ?? '';
+
+    expect(openSection.split('## Kudos')[0]?.trim().split('\n')).toEqual([
+      '- Ship the rollback',
+      '- Draft the RFC',
+      '- Answer the survey',
+    ]);
+  });
+
+  it('leaves the order of an unranked day alone', () => {
+    const plain = day('2026-08-04', [
+      { title: 'Answer the survey', status: 'upcoming' },
+      { title: 'Draft the RFC', status: 'upcoming' },
+    ]);
+    const todaySection = standupSummary(plain, null).split('Today:')[1] ?? '';
+
+    expect(todaySection.trim().split('\n')).toEqual(['- Answer the survey', '- Draft the RFC']);
+  });
+});

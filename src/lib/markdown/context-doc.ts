@@ -33,7 +33,7 @@ are preserved — but changes to this file will be overwritten.
 | --------------------- | ---------------------------------------------------------------- |
 | \`YYYY-MM-DD.md\`       | **Source.** One workday: its task list and timestamped notes.    |
 | \`team.<person>.md\`    | **Source.** A manager's running notes on one direct report. Only present when the user tracks reports. |
-| \`YYYY-Www.md\`         | *Derived.* A generated weekly rollup (completed work, open items, kudos). |
+| \`YYYY-Www.md\`         | *Derived.* A generated weekly rollup (completed work, open items, kudos). Its "Still open" list leads with whatever was ranked on the last logged day. |
 | \`YYYY-Www-team.md\`    | *Derived.* A generated weekly rollup across every tracked report. |
 | \`CONTEXT.md\`          | This file.                                                        |
 
@@ -59,8 +59,8 @@ last_check_in: 14:00
 
 ## Tasks
 
+- [/] Ship the rollback path _(priority 1)_
 - [ ] Draft the migration RFC _(added 2026-07-29)_
-- [/] Ship the rollback path
 - [x] Review the release checklist _(added 2026-07-31)_
 
 ## Notes
@@ -97,6 +97,43 @@ is v2. That boundary is when the user upgraded, not anything about their work.
 Open tasks (upcoming and in progress) roll over into the next day's file.
 Completed tasks stay in the day that finished them — so to find when something
 was completed, look for the day whose file marks it \`[x]\`.
+
+### Task priorities — what the user chose to focus on
+
+A task may carry \`_(priority N)_\`, \`1\` first. That is the user's own ranking of
+their day: at most five tasks, numbered densely from 1, and only ever on
+**open** tasks. It is the one thing in a day file that records a *decision*
+rather than an event — everything else says what happened, this says what the
+user meant to happen.
+
+Two things follow, and both matter when you summarize:
+
+- **Most days have no ranks at all.** Ranking is optional and unused days are
+  the norm, so an unranked task is **not** "low priority" — it is a task on a
+  day where nothing was ranked, or one the user simply didn't put in the top
+  five. Never report unranked work as deprioritised.
+- **Those rules describe what the app writes.** A hand-edited file may hold
+  sparse (\`1, 4, 9\`), duplicated or out-of-range ranks; the app tidies them to a
+  dense \`1…n\` the next time it opens and writes that file, keeping their
+  relative order and dropping anything past the fifth. If you add a rank
+  yourself, expect it to be renumbered — and don't rank more than five tasks,
+  because the sixth will simply be dropped.
+- **The app never leaves a rank on a completed task.** When a ranked task is
+  finished the number is released and the ones below it move up, so the open
+  list always reads \`1, 2, 3\` rather than \`1, 3, 5\`. This means a day file
+  cannot tell you that a *completed* task was once someone's number one — the
+  ranks you see are the ranking of the work still outstanding as of the last
+  check-in that day. (A rank sitting on a \`[x]\` line is therefore a human's own
+  hand edit, not something the app wrote, and the app will tidy it away the next
+  time it saves that file.)
+  Within a single file you cannot tell whether a priority was *met*, and
+  comparing the ranked lines against the \`[x]\` lines will not tell you either —
+  by construction no completed task carries a rank, so those two sets never
+  overlap. What does work is reading the **previous** working day's file: ranks
+  carry forward, so what was ranked there is the ranking this day opened with,
+  and anything on that list marked \`[x]\` here is a priority that got done. Work
+  that was ranked and finished on the same day leaves no record of having been
+  ranked at all.
 
 ### Task dates — how long something took
 
@@ -203,6 +240,10 @@ the manager-perspective sibling of \`YYYY-Www.md\`.
   nothing about *when* it'll be done. Note explicitly if a report has nothing
   in one of these sections rather than omitting them silently; a quiet week is
   worth saying so, not worth inventing content to fill.
+- **"What was I meant to be focusing on?"** — read the \`_(priority N)_\` ranks in
+  that day's file, remembering they describe what was still open at the end of
+  the day. A day with no ranks means the user didn't rank that day, not that
+  nothing mattered.
 - **"What's been dragging?" / "What took longest?"** — compare each completed
   task's \`_(added …)_\` date with the date of the file that marks it \`[x]\`. For
   work still open, compare against today. Read the \`## Notes\` around a long

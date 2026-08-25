@@ -42,6 +42,40 @@ test('capture: the day-start check-in', async ({ page }) => {
   await page.screenshot({ path: `${SHOTS}/day-start.png` });
 });
 
+test('capture: a ranked day', async ({ page }) => {
+  await startApp(page, {
+    now: new Date(2026, 7, 3, 14, 20),
+    files: {
+      '2026-08-03.md': dayFile(
+        '2026-08-03',
+        [
+          { title: 'Ship the rollback path', marker: '/', priority: 1 },
+          { title: 'Draft the migration RFC', marker: ' ', priority: 2, added: '2026-07-31' },
+          { title: 'Review the release checklist', marker: ' ', priority: 3 },
+          { title: 'Answer the compliance survey', marker: ' ' },
+        ],
+        { lastCheckIn: '13:00' },
+      ),
+    },
+  });
+
+  // The ranked block leads the list; the unranked task sits below it.
+  await expect(page.locator('.task.is-priority')).toHaveCount(3);
+
+  await settle(page);
+
+  // Hover a ranked row before capturing: the star and the ▲▼ pair only appear
+  // on hover or focus, so a resting shot shows the numbers and none of the
+  // controls the README is describing beside it.
+  await page.locator('.task', { hasText: 'Draft the migration RFC' }).hover();
+  const hovered = page.locator('.task', { hasText: 'Draft the migration RFC' });
+  await expect(hovered.locator('.task-priority')).toHaveCSS('opacity', '1');
+  await expect(hovered.locator('.task-move')).toHaveCount(2);
+  await page.waitForTimeout(300);
+
+  await page.screenshot({ path: `${SHOTS}/priorities.png` });
+});
+
 test('capture: an hourly check-in mid-flow', async ({ page }) => {
   // The day must already be open, or the scheduler correctly upgrades this to a
   // day-start and the shot shows the wrong prompt.
