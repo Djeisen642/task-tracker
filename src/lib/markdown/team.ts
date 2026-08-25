@@ -45,7 +45,7 @@ import { parseTaskLine, renderTaskLine } from './task-line.ts';
 import {
   emptyPreserved,
   isPlaceholder,
-  preservedLines,
+  splitPreserved,
   renderSection,
   splitOwnedSections,
   trimBlankEdges,
@@ -98,10 +98,12 @@ function parseTasks(lines: readonly string[]): {
   tasks: Task[];
   completedDates: Record<string, DateKey>;
   extra: string[];
+  firstItemAt: number;
 } {
   const tasks: Task[] = [];
   const completedDates: Record<string, DateKey> = {};
   const extra: string[] = [];
+  let firstItemAt = -1;
 
   for (const line of lines) {
     const item = parseTaskLine(line);
@@ -110,6 +112,8 @@ function parseTasks(lines: readonly string[]): {
       if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
+
+    if (firstItemAt === -1) firstItemAt = extra.length;
 
     const status = item.status;
     let title = item.text;
@@ -127,12 +131,17 @@ function parseTasks(lines: readonly string[]): {
     tasks.push({ title, status });
   }
 
-  return { tasks, completedDates, extra };
+  return { tasks, completedDates, extra, firstItemAt };
 }
 
-function parseNotes(lines: readonly string[]): { notes: TeamNote[]; extra: string[] } {
+function parseNotes(lines: readonly string[]): {
+  notes: TeamNote[];
+  extra: string[];
+  firstItemAt: number;
+} {
   const notes: TeamNote[] = [];
   const extra: string[] = [];
+  let firstItemAt = -1;
 
   for (const line of lines) {
     const match = NOTE_PATTERN.exec(line);
@@ -144,10 +153,12 @@ function parseNotes(lines: readonly string[]): { notes: TeamNote[]; extra: strin
       continue;
     }
 
+    if (firstItemAt === -1) firstItemAt = extra.length;
+
     notes.push({ date: match[1] ?? '', text });
   }
 
-  return { notes, extra };
+  return { notes, extra, firstItemAt };
 }
 
 /**
@@ -179,8 +190,8 @@ export function parseTeamMember(source: string, fallback: { person: string }): T
     extraSections,
     preserved: {
       preamble,
-      tasks: preservedLines(parsedTasks.extra),
-      notes: preservedLines(parsedNotes.extra),
+      tasks: splitPreserved(parsedTasks.extra, parsedTasks.firstItemAt),
+      notes: splitPreserved(parsedNotes.extra, parsedNotes.firstItemAt),
     },
   };
 }

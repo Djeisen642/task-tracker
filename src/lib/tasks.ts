@@ -122,14 +122,24 @@ export function addTask(
   return [...tasks, { title: trimmed, status, ...(added === undefined ? {} : { added }) }];
 }
 
-/** Set the status of the task matching `title`. Returns a new array. */
-export function setTaskStatus(tasks: readonly Task[], title: string, status: TaskStatus): Task[] {
-  return tasks.map((task) => (sameTask(task.title, title) ? { ...task, status } : task));
+/**
+ * Set the status of one task. Returns a new array.
+ *
+ * Identified by *reference*, not by title. A title is how a human refers to a
+ * task, and `sameTask` deliberately ignores case and surrounding whitespace so
+ * that re-typing a carried-over task doesn't duplicate it — but that makes it
+ * the wrong key for "which row did the user just click". A file holding both
+ * `- Ship it` and `- [ ] ship it` is two lines and two rows, and ticking one of
+ * them used to tick both. The list is ordered and the caller is holding the
+ * task it rendered, so the object itself is the identity.
+ */
+export function setTaskStatus(tasks: readonly Task[], target: Task, status: TaskStatus): Task[] {
+  return tasks.map((task) => (task === target ? { ...task, status } : task));
 }
 
-/** Remove the task matching `title`. Returns a new array. */
-export function removeTask(tasks: readonly Task[], title: string): Task[] {
-  return tasks.filter((task) => !sameTask(task.title, title));
+/** Remove one task, identified by reference. Returns a new array. */
+export function removeTask(tasks: readonly Task[], target: Task): Task[] {
+  return tasks.filter((task) => task !== target);
 }
 
 /**

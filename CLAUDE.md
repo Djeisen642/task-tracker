@@ -170,9 +170,21 @@ docs/
   kinds of content were silently deleted: anything above the first `##` heading,
   a `###` subheading and its body (that is section _content_, not a section),
   and any line inside `## Tasks`/`## Notes` that wasn't an item. They now live
-  in `DayDocument.preserved` / `TeamMemberDocument.preserved` and are re-emitted
-  below the items — the content is the guarantee, its exact line number is not.
-  Anything new that reads a section must keep what it doesn't model.
+  in `DayDocument.preserved` / `TeamMemberDocument.preserved`, split into what
+  _led_ the item list and what _followed_ it — a `### Morning` subheading
+  re-emitted below the tasks it labels reads as a bug even though nothing was
+  lost. Those are the two positions that survive the app reordering its own
+  items; a paragraph written between two tasks still lands at the end. The
+  content is the guarantee, its exact line number is not. Anything new that
+  reads a section must keep what it doesn't model.
+- **A task is identified by reference, not by its title.** `sameTask` ignores
+  case and surrounding whitespace, which is right for "don't add this twice"
+  and wrong for "which row did the user just click" — a hand-edited file
+  holding `- Ship it` and `- [ ] ship it` is two lines and two rows, and
+  `setTaskStatus`/`removeTask` used to hit both. They take the `Task` object
+  now. Titles remain the key for adding, carrying over, and the team file's
+  `completedDates`, which is the same bug one level down and is written up in
+  `docs/future-work.md`.
 - **The grammar the two formats share lives in one module each.**
   `task-line.ts` holds the checkbox grammar and `sections.ts` the section split,
   because a day file and a team file are supposed to agree about both and had

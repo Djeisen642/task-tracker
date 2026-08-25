@@ -495,3 +495,41 @@ test('keeps a report file readable after the app rewrites it', async ({ page }) 
   expect(written).toContain('- Ship it');
   expect(written).toContain('- [ ] Something new');
 });
+
+test('ticks one of two near-identical lines, not both', async ({ page }) => {
+  // A hand-edited file can hold two titles that differ only in case. They are
+  // two lines and two rows; clicking one used to flip both, because the model
+  // looked tasks up by title.
+  await startApp(page, {
+    files: {
+      'team.greg.md': [
+        '---',
+        'person: greg',
+        '---',
+        '',
+        '# @greg',
+        '',
+        '## Tasks',
+        '',
+        '- [ ] Ship it',
+        '- [ ] ship it',
+        '',
+      ].join('\n'),
+    },
+  });
+
+  await openTeam(page);
+  await page.fill('#team-person-input', 'greg');
+  await page.press('#team-person-input', 'Enter');
+
+  const rows = page.locator('#team-task-list .task');
+  await expect(rows).toHaveCount(2);
+  await rows.nth(1).locator('.task-toggle').click();
+
+  await expect(rows.nth(0)).not.toHaveClass(/is-in-progress|is-completed/);
+  await expect(rows.nth(1)).toHaveClass(/is-in-progress/);
+
+  const written = await readVaultFile(page, 'team.greg.md');
+  expect(written).toContain('- [ ] Ship it');
+  expect(written).toContain('- [/] ship it');
+});

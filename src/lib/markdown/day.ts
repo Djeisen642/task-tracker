@@ -66,7 +66,7 @@ import { parseTaskLine, renderTaskLine } from './task-line.ts';
 import {
   emptyPreserved,
   isPlaceholder,
-  preservedLines,
+  splitPreserved,
   renderSection,
   splitOwnedSections,
   trimBlankEdges,
@@ -160,9 +160,13 @@ function parseFormatVersion(raw: string | undefined): number {
  * without the suffix: an unannotated line means "first appeared here", which is
  * what every file written before the field existed is truthfully saying.
  */
-function parseTasks(lines: readonly string[], date: DateKey): { tasks: Task[]; extra: string[] } {
+function parseTasks(
+  lines: readonly string[],
+  date: DateKey,
+): { tasks: Task[]; extra: string[]; firstItemAt: number } {
   const tasks: Task[] = [];
   const extra: string[] = [];
+  let firstItemAt = -1;
 
   for (const line of lines) {
     const item = parseTaskLine(line);
@@ -171,6 +175,8 @@ function parseTasks(lines: readonly string[], date: DateKey): { tasks: Task[]; e
       if (!isPlaceholder(line)) extra.push(line);
       continue;
     }
+
+    if (firstItemAt === -1) firstItemAt = extra.length;
 
     const status = item.status;
     let title = item.text;
@@ -190,12 +196,17 @@ function parseTasks(lines: readonly string[], date: DateKey): { tasks: Task[]; e
     tasks.push({ title, status, added });
   }
 
-  return { tasks, extra };
+  return { tasks, extra, firstItemAt };
 }
 
-function parseNotes(lines: readonly string[]): { notes: Note[]; extra: string[] } {
+function parseNotes(lines: readonly string[]): {
+  notes: Note[];
+  extra: string[];
+  firstItemAt: number;
+} {
   const notes: Note[] = [];
   const extra: string[] = [];
+  let firstItemAt = -1;
 
   for (const line of lines) {
     const match = NOTE_PATTERN.exec(line);
@@ -207,11 +218,13 @@ function parseNotes(lines: readonly string[]): { notes: Note[]; extra: string[] 
       continue;
     }
 
+    if (firstItemAt === -1) firstItemAt = extra.length;
+
     // Normalize `9:05` to `09:05` so sorting and rendering stay uniform.
     notes.push({ time: (match[1] ?? '').padStart(5, '0'), text });
   }
 
-  return { notes, extra };
+  return { notes, extra, firstItemAt };
 }
 
 /**
@@ -240,8 +253,8 @@ export function parseDay(
   const parsedNotes = parseNotes(owned.get(NOTES_HEADING) ?? []);
   const preserved: PreservedLines = {
     preamble,
-    tasks: preservedLines(parsedTasks.extra),
-    notes: preservedLines(parsedNotes.extra),
+    tasks: splitPreserved(parsedTasks.extra, parsedTasks.firstItemAt),
+    notes: splitPreserved(parsedNotes.extra, parsedNotes.firstItemAt),
   };
 
   // A malformed hand-edited value is dropped rather than trusted: a bad slot key

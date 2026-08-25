@@ -1064,10 +1064,10 @@ class CheckInController {
   private renderTeamTask(task: Task): HTMLLIElement {
     return renderTaskRow(task, {
       onToggle: () => {
-        this.updateTeamTasks(setTaskStatus(this.teamTasks(), task.title, cycleStatus(task.status)));
+        this.updateTeamTasks(setTaskStatus(this.teamTasks(), task, cycleStatus(task.status)));
       },
       onRemove: () => {
-        this.updateTeamTasks(removeTask(this.teamTasks(), task.title));
+        this.updateTeamTasks(removeTask(this.teamTasks(), task));
       },
     });
   }
@@ -1284,10 +1284,10 @@ class CheckInController {
     return renderTaskRow(task, {
       carried: this.day !== null && isCarriedOver(task, this.day.date),
       onToggle: () => {
-        this.updateTasks(setTaskStatus(this.tasks(), task.title, cycleStatus(task.status)));
+        this.updateTasks(setTaskStatus(this.tasks(), task, cycleStatus(task.status)));
       },
       onRemove: () => {
-        this.updateTasks(removeTask(this.tasks(), task.title));
+        this.updateTasks(removeTask(this.tasks(), task));
       },
     });
   }

@@ -132,37 +132,53 @@ describe('addTask', () => {
   });
 });
 
+/** Two tasks a human would call the same thing, as a hand-edited file can hold. */
+const NEAR_DUPLICATES: Task[] = [
+  { title: 'Ship it', status: 'upcoming' },
+  { title: 'ship it', status: 'upcoming' },
+];
+
 describe('setTaskStatus', () => {
-  it('updates the matching task only', () => {
-    const updated = setTaskStatus(TASKS, 'Draft the RFC', 'completed');
+  it('updates the given task only', () => {
+    const updated = setTaskStatus(TASKS, TASKS[0], 'completed');
     expect(updated[0]?.status).toBe('completed');
     expect(updated[1]?.status).toBe('in-progress');
   });
 
-  it('matches case-insensitively', () => {
-    expect(setTaskStatus(TASKS, 'draft the rfc', 'completed')[0]?.status).toBe('completed');
+  it('updates one of two tasks whose titles compare equal', () => {
+    // `sameTask` treats these as one, which is right for "don't add this
+    // twice" and wrong for "which row did the user click".
+    const updated = setTaskStatus(NEAR_DUPLICATES, NEAR_DUPLICATES[1], 'completed');
+
+    expect(updated.map((task) => task.status)).toEqual(['upcoming', 'completed']);
   });
 
-  it('is a no-op for an unknown title', () => {
-    expect(setTaskStatus(TASKS, 'Nope', 'completed')).toEqual(TASKS);
+  it('is a no-op for a task that is not in the list', () => {
+    expect(setTaskStatus(TASKS, { title: 'Nope', status: 'upcoming' }, 'completed')).toEqual(TASKS);
   });
 
   it('does not mutate the input', () => {
-    setTaskStatus(TASKS, 'Draft the RFC', 'completed');
+    setTaskStatus(TASKS, TASKS[0], 'completed');
     expect(TASKS[0]?.status).toBe('upcoming');
   });
 });
 
 describe('removeTask', () => {
-  it('drops the matching task', () => {
-    expect(removeTask(TASKS, 'Draft the RFC').map((task) => task.title)).toEqual([
+  it('drops the given task', () => {
+    expect(removeTask(TASKS, TASKS[0]).map((task) => task.title)).toEqual([
       'Ship the rollback',
       'Review the checklist',
     ]);
   });
 
-  it('is a no-op for an unknown title', () => {
-    expect(removeTask(TASKS, 'Nope')).toHaveLength(3);
+  it('drops one of two tasks whose titles compare equal', () => {
+    expect(removeTask(NEAR_DUPLICATES, NEAR_DUPLICATES[0]).map((task) => task.title)).toEqual([
+      'ship it',
+    ]);
+  });
+
+  it('is a no-op for a task that is not in the list', () => {
+    expect(removeTask(TASKS, { title: 'Nope', status: 'upcoming' })).toHaveLength(3);
   });
 });
 

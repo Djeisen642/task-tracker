@@ -26,18 +26,63 @@ export interface ExtraSection {
  * context, a stray thought. The file is the only copy of that data, and the
  * app rewrites it on every check-in.
  */
+/**
+ * Unmodelled lines from one owned section, split by where they sat.
+ *
+ * Two buckets rather than one, because a section's prose is almost always
+ * *introducing* the list or *following* it: a `### Morning` subheading above
+ * the items, a paragraph of context below them. Re-emitting all of it below the
+ * list moved that subheading underneath the tasks it labels, which reads as a
+ * mistake even though nothing was lost.
+ *
+ * It is still not a faithful record of position — a paragraph written between
+ * two items lands at the end of `trail` — because the app owns the ordering of
+ * what it models and there is no stable anchor between two items that may swap
+ * places. Leading and trailing are the two positions that survive reordering.
+ */
+export interface PreservedSection {
+  /** Before the first item the format recognized. */
+  lead: string[];
+  /** After it. */
+  trail: string[];
+}
+
 export interface PreservedLines {
   /** Between the `#` title and the first `##` heading. */
   preamble: string[];
   /** Inside the tasks section, but not a task item. */
-  tasks: string[];
+  tasks: PreservedSection;
   /** Inside the notes section, but not a note. */
-  notes: string[];
+  notes: PreservedSection;
+}
+
+/**
+ * Split collected non-item lines into what led the list and what followed it.
+ *
+ * `firstItemAt` is the index, within the lines collected so far, at which the
+ * section's first real item appeared — so everything gathered before that point
+ * introduced the list.
+ */
+export function splitPreserved(lines: readonly string[], firstItemAt: number): PreservedSection {
+  // No items at all: the whole section is somebody's prose, and it leads
+  // nothing. `-1` passed straight to `slice` would quietly move its last line
+  // to the other bucket.
+  const at = firstItemAt === -1 ? lines.length : firstItemAt;
+
+  return {
+    lead: preservedLines(lines.slice(0, at)),
+    trail: preservedLines(lines.slice(at)),
+  };
+}
+
+/** An empty pair, for a section with nothing to preserve. */
+export function emptySection(): PreservedSection {
+  return { lead: [], trail: [] };
 }
 
 /** Nothing preserved — the starting point for a document the app creates. */
 export function emptyPreserved(): PreservedLines {
-  return { preamble: [], tasks: [], notes: [] };
+  return { preamble: [], tasks: emptySection(), notes: emptySection() };
 }
 
 /**
@@ -188,13 +233,27 @@ export function renderSection(
   heading: string,
   items: readonly string[],
   placeholder: string,
-  preserved: readonly string[],
+  preserved: PreservedSection,
 ): string {
-  const body = items.length > 0 ? [...items] : preserved.length > 0 ? [] : [placeholder];
-  if (preserved.length > 0) {
+  const body: string[] = [];
+  const push = (lines: readonly string[]): void => {
+    if (lines.length === 0) return;
     if (body.length > 0) body.push('');
-    body.push(...trimBlankEdges(preserved));
-  }
+    body.push(...trimBlankEdges(lines));
+  };
+
+  push(preserved.lead);
+  // The placeholder is the app saying the section is empty. With preserved
+  // prose sitting there it would be talking over somebody, so it appears only
+  // when the section really has nothing in it.
+  push(
+    items.length > 0
+      ? items
+      : preserved.lead.length + preserved.trail.length > 0
+        ? []
+        : [placeholder],
+  );
+  push(preserved.trail);
 
   return [heading, '', ...body].join('\n');
 }

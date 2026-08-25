@@ -127,7 +127,7 @@ describe('parseTeamMember', () => {
     const source = '---\nperson: alice\n---\n\n# @alice\n\n## Tasks\n\n_Nothing tracked yet._\n';
     const member = parseTeamMember(source, FALLBACK);
 
-    expect(member.preserved.tasks).toEqual([]);
+    expect(member.preserved.tasks).toEqual({ lead: [], trail: [] });
     // And it comes back exactly once, because the section is still empty.
     expect(serializeTeamMember(member).match(/_Nothing tracked yet\._/g)).toHaveLength(1);
   });
@@ -140,6 +140,50 @@ describe('parseTeamMember', () => {
     const member = parseTeamMember('## Tasks\n\n- [ ] Parent\n  - detail\n', FALLBACK);
 
     expect(member.tasks.map((task) => task.title)).toEqual(['Parent', 'detail']);
+  });
+
+  it('keeps a subheading above the list it introduces', () => {
+    // Position is not fully recoverable, but leading and trailing are: a
+    // `### This quarter` re-emitted *below* the tasks it labels reads as a bug
+    // even though nothing was lost.
+    const source = [
+      '---',
+      'person: alice',
+      '---',
+      '',
+      '# @alice',
+      '',
+      '## Tasks',
+      '',
+      '### This quarter',
+      '',
+      '- [ ] Ship the migration',
+      '',
+      'Chased legal on Tuesday.',
+      '',
+    ].join('\n');
+
+    const written = serializeTeamMember(parseTeamMember(source, FALLBACK));
+    const tasks = written.split('## Tasks')[1]?.split('## Notes')[0] ?? '';
+
+    expect(tasks.trim().split('\n').filter(Boolean)).toEqual([
+      '### This quarter',
+      '- [ ] Ship the migration',
+      'Chased legal on Tuesday.',
+    ]);
+    expect(serializeTeamMember(parseTeamMember(written, FALLBACK))).toBe(written);
+  });
+
+  it('keeps prose in a section with no items at all', () => {
+    const source =
+      '---\nperson: alice\n---\n\n# @alice\n\n## Tasks\n\nNothing assigned yet, see the doc.\n';
+    const member = parseTeamMember(source, FALLBACK);
+
+    expect(member.preserved.tasks).toEqual({
+      lead: ['Nothing assigned yet, see the doc.'],
+      trail: [],
+    });
+    expect(serializeTeamMember(member)).toContain('Nothing assigned yet, see the doc.');
   });
 
   it('preserves prose inside the sections it owns', () => {
@@ -319,7 +363,11 @@ describe('createTeamMember', () => {
       notes: [],
       extraFields: {},
       extraSections: [],
-      preserved: { preamble: [], tasks: [], notes: [] },
+      preserved: {
+        preamble: [],
+        tasks: { lead: [], trail: [] },
+        notes: { lead: [], trail: [] },
+      },
     });
   });
 });
