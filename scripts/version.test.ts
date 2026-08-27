@@ -17,6 +17,7 @@ import {
   setCargoTomlVersion,
   setJsonVersion,
   validateCommitMessage,
+  versionToRelease,
 } from './version.ts';
 import type { ConventionalCommit } from './version.ts';
 
@@ -191,6 +192,32 @@ describe('nextVersion', () => {
   it('refuses a version that is not x.y.z', () => {
     expect(() => nextVersion('0.1', 'patch')).toThrow(/x\.y\.z/);
     expect(() => nextVersion('v0.1.0', 'patch')).toThrow(/x\.y\.z/);
+  });
+});
+
+describe('versionToRelease', () => {
+  it('releases a declared-but-untagged version as itself, so 1.0.0 can exist', () => {
+    expect(versionToRelease('1.0.0', false, 'patch')).toBe('1.0.0');
+  });
+
+  it('releases an untagged version even when nothing since would earn a bump', () => {
+    expect(versionToRelease('1.0.0', false, null)).toBe('1.0.0');
+  });
+
+  it('bumps once the declared version has a tag of its own', () => {
+    expect(versionToRelease('1.0.0', true, 'minor')).toBe('1.1.0');
+  });
+
+  it('is null when the version is tagged and nothing releasable landed', () => {
+    expect(versionToRelease('1.0.0', true, null)).toBeNull();
+  });
+
+  it('costs a major once past 1.0, where a breaking change is no longer free', () => {
+    expect(versionToRelease('1.0.0', true, 'major')).toBe('2.0.0');
+  });
+
+  it('refuses a version that is not x.y.z rather than releasing it', () => {
+    expect(() => versionToRelease('1.0', false, null)).toThrow(/x\.y\.z/);
   });
 });
 

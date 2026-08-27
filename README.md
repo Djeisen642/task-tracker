@@ -342,13 +342,20 @@ The other types — `build`, `chore`, `ci`, `docs`, `refactor`, `revert`, `style
 of dependency bumps and README fixes produces no version, which is the point:
 releases nobody can tell apart are worse than no releases.
 
-**Below 1.0.0, a breaking change bumps the minor** (`0.1.0` → `0.2.0`) rather
-than declaring `1.0.0`. Reaching 1.0 is a statement about the app being finished
-enough to promise compatibility — a decision for a person, not something that
-should fall out of a `!` in a commit subject.
-
 Merge, revert and `fixup!` subjects are exempt: git wrote them, and the work
 they carry is already in the log.
+
+**The app is at 1.0.0, so a breaking change now costs a major version.** That
+number was set by hand, which is the point: reaching 1.0 is a statement about
+the app being finished enough to promise compatibility, and it should not fall
+out of a `!` in a commit subject. Below 1.0.0 the tooling refuses to declare it
+— a breaking change bumps the minor instead (`0.1.0` → `0.2.0`) — so a fork
+starting from zero has to make the same decision deliberately.
+
+A version declared in `package.json` but never tagged is released **as itself**
+rather than bumped past. That is what let `1.0.0` actually reach a tag: without
+it the first releasable commit after the decision would have computed `1.0.1`
+and `v1.0.0` would never have existed.
 
 ### What happens on merge
 
@@ -357,7 +364,9 @@ always points at a commit that survived lint, tests, the build and the Rust
 gate. It reads the commits since the last `v*` tag, and if any of them earn a
 bump it writes the new number into all four files, commits `Release vX.Y.Z`,
 tags it, and publishes a GitHub release whose notes are grouped by consequence —
-breaking changes first, then features, then fixes.
+breaking changes first, then features, then fixes. When the declared version has
+no tag yet, that version is what ships, and there is no commit to make — the tag
+is the whole release.
 
 That push is authenticated with `GITHUB_TOKEN`, which by design does not trigger
 further workflow runs, so the release commit cannot start a second release. It
@@ -386,10 +395,14 @@ runs format, lint, typecheck and tests; `pnpm run build` proves it bundles.
 
 ## Status
 
-Pre-v0.1. The web layer is built and tested (607 unit tests plus 106 end-to-end
-tests driving the real card in a browser), and the Rust layer compiles clean —
-`cargo check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check`
-all pass.
+**v1.0.0 — in daily use.** That is what the version number is for, and it is the
+only thing that could have set it: nothing in the tooling promotes an app to 1.0
+on its own.
+
+The web layer is built and tested (613 unit tests plus 106 end-to-end tests
+driving the real card in a browser), and the Rust layer compiles clean — `cargo
+check`, `cargo test`, `cargo clippy -D warnings` and `cargo fmt --check` all
+pass.
 
 Everything above the MVP line in [`docs/future-work.md`](docs/future-work.md) is
 built: the check-in loop, the vault and its rollups, the settings panel, manager
@@ -401,12 +414,12 @@ the vault path resolves per-platform, and the two places that do differ (the
 Dock-less menu-bar app on macOS, transparency needing the macOS private-API
 flag) are handled.
 
-What has **never run** is the app itself on any desktop. That is the only thing
-standing between this and v0.1. See "Known unknowns" for what needs verifying on
-real hardware, starting with whether the card can take keyboard focus under
-Windows' foreground-activation rules — the one open question that could force a
-design change — and, on macOS and Linux, whether the tray icon and the
-transparent card look right rather than merely appear.
+"Known unknowns" in [`docs/future-work.md`](docs/future-work.md) is narrower
+than it was but not empty. Those questions — the tray, window positioning,
+transparency, launch-at-login, and whether the card takes keyboard focus under
+Windows' foreground-activation rules — are answered by running the app, and
+running it answers them **for one OS at a time**. On any platform this hasn't
+been used on, they are still reviewed-but-unrun.
 
 ## License
 

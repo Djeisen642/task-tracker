@@ -1,7 +1,7 @@
 {
   "name": "task-tracker",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "Ultra-lightweight Windows system-tray utility that prompts you hourly to log tasks and notes, storing everything as plain Markdown an AI agent can read.",
   "license": "MIT",

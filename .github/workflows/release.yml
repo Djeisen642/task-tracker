@@ -95,7 +95,14 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit --all --message "Release v$VERSION"
+          # A version declared by hand and released as itself changes no files,
+          # and `git commit` on an empty tree fails. The tag is the release; the
+          # commit only exists when the number actually moved.
+          if git diff --quiet; then
+            echo "The four files already say $VERSION; tagging without a commit."
+          else
+            git commit --all --message "Release v$VERSION"
+          fi
           git tag --annotate "v$VERSION" --message "v$VERSION"
           # Atomic: a branch that moved without its tag would leave the next run
           # computing its bump from the previous tag and releasing the same work

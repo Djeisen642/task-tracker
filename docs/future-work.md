@@ -292,9 +292,10 @@ The Rust compiles and its tests pass — `cargo check`, `cargo test`, `cargo
 clippy --all-targets -- -D warnings` and `cargo fmt --check` were all run
 against this tree, and `Cargo.lock` is committed.
 
-What was **never executed** is anything requiring a desktop webview — on any
-platform. The list below is reviewed for correctness only; verify each on real
-hardware before trusting it:
+The app is now in daily use, which answers some of the list below — but it
+answers them **for one OS at a time**, and there are three. On any platform it
+has not been run on, everything here is still reviewed for correctness only;
+verify each on real hardware before trusting it:
 
 1. **Windows foreground activation.** `SetForegroundWindow` is refused for a
    process that hasn't received recent user input, which is exactly a timer

@@ -204,6 +204,24 @@ export function nextVersion(current: string, bump: Bump): string {
   }
 }
 
+/**
+ * The version this push should release, or `null` for "nothing to release".
+ *
+ * A version declared in `package.json` but never tagged is released as itself
+ * rather than bumped past. That is what lets a hand-set number reach a tag: 1.0
+ * is a person's decision, and without this the first releasable commit after
+ * that decision would compute 1.0.1 and v1.0.0 would never exist.
+ */
+export function versionToRelease(
+  current: string,
+  currentIsTagged: boolean,
+  bump: Bump | null,
+): string | null {
+  parseVersion(current);
+  if (!currentIsTagged) return current;
+  return bump === null ? null : nextVersion(current, bump);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Rewriting the four files                                                   */
 /* -------------------------------------------------------------------------- */
@@ -446,17 +464,33 @@ async function sync(target: string | undefined): Promise<void> {
   }
 }
 
+/** Has the version currently declared in `package.json` already been tagged? */
+function isVersionTagged(version: string): boolean {
+  try {
+    return git(['tag', '--list', `v${version}`], true) !== '';
+  } catch {
+    return false;
+  }
+}
+
 async function next(): Promise<void> {
+  const current = await currentVersion();
+  const tagged = isVersionTagged(current);
   const tag = lastReleaseTag();
-  const bump = releaseBump(commitsSince(tag));
+  const version = versionToRelease(current, tagged, releaseBump(commitsSince(tag)));
+
   // Nothing on stdout means nothing to release, which is what the release
   // workflow tests. Reasoning goes to stderr so it stays out of that answer.
-  console.error(tag === null ? 'No release tag yet; reading the whole history.' : `Since ${tag}.`);
-  if (bump === null) {
-    console.error('No feat, fix, perf or breaking change since then — nothing to release.');
-    return;
+  if (!tagged) {
+    console.error(`v${current} is declared but never tagged — releasing it as it stands.`);
+  } else {
+    console.error(`Since ${tag ?? 'the start of the history'}.`);
+    if (version === null) {
+      console.error('No feat, fix, perf or breaking change since then — nothing to release.');
+    }
   }
-  console.log(nextVersion(await currentVersion(), bump));
+
+  if (version !== null) console.log(version);
 }
 
 function notes(): void {

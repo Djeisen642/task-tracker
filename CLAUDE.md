@@ -327,10 +327,18 @@ docs/
   hook enforces the Conventional Commits grammar because the version now depends
   on it, and the failure mode without it is silent — the commit lands and the
   version simply doesn't move. A week of `chore:` and `docs:` releases nothing on
-  purpose. Below 1.0.0 a breaking change bumps the _minor_: declaring 1.0 is a
-  statement that the app is finished enough to promise compatibility, which is a
-  person's decision and not something to fall out of a `!` in a subject line.
-  Merge, revert and `fixup!` subjects are exempt — git wrote them.
+  purpose. Merge, revert and `fixup!` subjects are exempt — git wrote them.
+- **1.0 is set by hand; the tooling will not promote an app to it.** Below 1.0.0
+  `nextVersion` demotes a breaking change to a _minor_ bump, because declaring
+  1.0 is a statement that the app is finished enough to promise compatibility —
+  a person's decision, not something to fall out of a `!` in a subject line.
+  This app is past that now (the author set 1.0.0 on the strength of using it
+  daily), so the rule is inert here and a breaking change costs a major. Don't
+  delete it: it is what a fork starting from zero runs into. The other half of
+  that decision is `versionToRelease` — a version declared in `package.json`
+  but never tagged releases _as itself_ rather than being bumped past, which is
+  the only reason `v1.0.0` exists at all. Without it the first `fix:` after the
+  decision would have tagged `v1.0.1` over a version nobody ever shipped.
 - **A vault migration is a script, not a startup path.** `scripts/` is outside
   the app for a reason: the app touches one file at a time and has no evidence
   about what preceded it, whereas a migration reads the whole vault, derives
