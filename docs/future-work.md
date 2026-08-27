@@ -292,53 +292,50 @@ The Rust compiles and its tests pass — `cargo check`, `cargo test`, `cargo
 clippy --all-targets -- -D warnings` and `cargo fmt --check` were all run
 against this tree, and `Cargo.lock` is committed.
 
-The app is now in daily use, which answers some of the list below — but it
-answers them **for one OS at a time**, and there are three. On any platform it
-has not been run on, everything here is still reviewed for correctness only;
-verify each on real hardware before trusting it:
+**Windows is verified by use.** The app has run daily on Windows through the
+whole loop — hourly prompts producing day files worth reading back, the tray and
+its menu, the settings panel, launch-at-login, the clipboard copies and the
+expand toggle. What this list used to open with is answered there:
 
-1. **Windows foreground activation.** `SetForegroundWindow` is refused for a
-   process that hasn't received recent user input, which is exactly a timer
-   firing at 14:00. `show()` + `set_focus()` + `request_user_attention()` is the
-   documented mitigation, but whether the card reliably lands _focused and ready
-   to type_ is the single most important thing to test on-device. If it doesn't,
-   the fallback is a brief `always_on_top` toggle or an `AttachThreadInput`
-   workaround in Rust.
-2. **Transparency, `skipTaskbar` and always-on-top** behaving as configured on
-   Windows 11, including on a multi-monitor setup with mixed DPI.
-3. **Tray icon and menu** rendering, and each menu item's event reaching the
-   webview.
-4. **The autostart plugin** actually registering at login. The settings panel now
-   toggles it, but `enable()`/`disable()` are no-ops in a browser, so the
-   checkbox has only ever been driven against a stub.
-5. **The tray's "Settings…" item** reaching the webview. The panel itself is
-   covered end to end, but only via the card's gear — a browser has no tray, so
-   the `open-settings` event and the hidden-window path it opens through are
-   reviewed, not run.
-6. **Clipboard writes** from a hidden window — the standup copy fires from the
-   tray while the card may not be visible.
-7. **The settings panel's native controls.** `input[type="time"]` is painted by
-   the webview in the OS locale's format — 12-hour with a meridiem on a US
-   machine, 24-hour elsewhere — and the field is sized for the wider of the two.
-   Worth a look on a real Windows install, along with `color-scheme: dark`
-   actually darkening the time picker's dropdown.
-8. **The whole loop end to end** — a real workday of hourly prompts producing a
-   day file you'd actually want to read back.
-9. **macOS specifics.** Three things differ there and none has been seen: the
+- **Foreground activation works.** `SetForegroundWindow` is refused for a
+  process that hasn't received recent user input — which is exactly a timer
+  firing at 14:00 — and the `show()` + `set_focus()` + `request_user_attention()`
+  sequence is enough: the card lands focused and ready to type. This was the one
+  open question that could have forced a design change, and it didn't. Don't
+  weaken that sequence or reorder it on the strength of a refactor.
+- **Transparency, `skipTaskbar` and always-on-top** behave as configured on
+  Windows 11.
+- **The tray icon and menu** render, and each item's event reaches the webview —
+  including "Settings…", which opens the panel through the hidden-window path
+  that no browser test can exercise.
+- **The autostart plugin** registers at login. The settings toggle drives the
+  real thing, not the browser stub.
+- **Clipboard writes work from a hidden window**, which is how the tray's
+  standup copy fires when the card isn't visible.
+- **`setSize` resizes a window configured `resizable: false`**, and re-invoking
+  `position_checkin` afterwards keeps it pinned to the corner rather than letting
+  the platform re-centre it.
+
+That is one OS of three, and one machine of many. Still unverified:
+
+1. **Multi-monitor, mixed-DPI placement.** Daily use on one display says nothing
+   about whether the card lands in the right corner of the right screen when two
+   monitors disagree about scaling. Per-monitor DPI correctness for the card's
+   size is the same question.
+2. **The settings panel's native controls outside one locale.**
+   `input[type="time"]` is painted by the webview in the OS locale's format —
+   12-hour with a meridiem on a US machine, 24-hour elsewhere — and the field is
+   sized for the wider of the two. The 24-hour case, and whether
+   `color-scheme: dark` actually darkens the time picker's dropdown, are unseen.
+3. **macOS specifics.** Three things differ there and none has been seen: the
    card is transparent only because `macOSPrivateApi` + the `macos-private-api`
    Cargo feature are enabled (without them it paints opaque, and the failure is
    silent); `ActivationPolicy::Accessory` is what keeps it out of the Dock and
    the ⌘-Tab switcher, which also means `request_user_attention` has no Dock
    icon to bounce; and the tray icon is colour art rather than a template image,
    so check how it sits in a dark menu bar.
-10. **Linux specifics.** Transparency needs a compositing window manager — under
-    a bare X11 session without one the card's rounded corners get a black box
-    behind them. The tray needs a panel that speaks StatusNotifier (GNOME needs
-    an AppIndicator extension; KDE and most others are fine), and `skipTaskbar`
-    is an X11 hint some Wayland compositors ignore.
-11. **The expand/collapse toggle's `setSize` call**, against a window configured
-    `resizable: false`. Programmatic resize is expected to work regardless of
-    that flag — it's a common pattern for splash-to-main-window transitions —
-    but it's unverified against a real Windows compositor, and so is whether
-    re-invoking `position_checkin` after the resize reliably keeps the window
-    pinned to the same corner rather than a platform re-centering it.
+4. **Linux specifics.** Transparency needs a compositing window manager — under
+   a bare X11 session without one the card's rounded corners get a black box
+   behind them. The tray needs a panel that speaks StatusNotifier (GNOME needs
+   an AppIndicator extension; KDE and most others are fine), and `skipTaskbar`
+   is an X11 hint some Wayland compositors ignore.

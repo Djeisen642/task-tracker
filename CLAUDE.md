@@ -526,21 +526,29 @@ Then all four gates run (~90s for the first `cargo check`; seconds after that).
 Verified in this sandbox. Don't conclude from the first error that Rust can only
 be checked in CI, and don't report the Rust gate as passing without running it.
 
-What this environment lacks is a **desktop webview and any real desktop machine**
-(no Windows, no macOS), so the following are _reviewed for correctness but never
-executed_. Verify each on real hardware before trusting it. The full list lives in `docs/future-work.md`
-under "Known unknowns"; the headlines:
+What this environment lacks is a **desktop webview and any real desktop
+machine**. That does not mean nothing here is verified — it means _this sandbox_
+cannot verify it, and the author's daily use can.
 
-- **Windows foreground activation.** `SetForegroundWindow` is refused for a
-  process that hasn't received recent user input — exactly a timer firing at
-  14:00. `show()` + `set_focus()` + `request_user_attention()` is the mitigation,
-  but whether the card lands _focused and ready to type_ is the most important
-  thing to test on-device.
-- **The transparent, always-on-top, `skipTaskbar` window** behaving as configured
-  on Windows 11, including top-left placement on a multi-monitor, mixed-DPI setup.
-- **Tray icon + menu** rendering, and each item's event reaching the webview.
-- **The autostart plugin** registering at login, and clipboard writes from a
-  hidden window.
+**Windows is verified by use, and that is load-bearing.** Foreground activation,
+the transparent always-on-top `skipTaskbar` window, the tray icon and every menu
+item's event, launch-at-login, clipboard writes from a hidden window, and
+`setSize` against `resizable: false` all work on Windows 11. Treat that as
+regression surface, not as licence: `show()` + `set_focus()` +
+`request_user_attention()` is the sequence that makes a timer firing at 14:00
+land focused and ready to type, and `SetForegroundWindow` is refused for a
+process that hasn't had recent user input — so don't reorder or thin that
+sequence because a refactor makes it look redundant. Nothing in this sandbox
+will tell you when you've broken it.
 
-When you touch any of the above, say explicitly in your summary that it is
-reviewed-but-unrun, and list what the user must check on-device.
+**macOS and Linux have never been run**, and neither has a multi-monitor
+mixed-DPI setup. Those remain _reviewed for correctness but never executed_ —
+the full list is in `docs/future-work.md` under "Known unknowns". The macOS one
+to fear is silent: transparency needs `macOSPrivateApi` in `tauri.conf.json`
+_and_ the `macos-private-api` Cargo feature, and with only one of them the card
+paints opaque with nothing in lint, tests or a Linux build saying a word.
+
+When you touch anything in that second group, say explicitly in your summary
+that it is reviewed-but-unrun, and list what the user must check on-device. When
+you touch something in the first, say which platform it is verified on — "works
+on Windows" is a different claim from "works".

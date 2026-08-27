@@ -395,9 +395,9 @@ runs format, lint, typecheck and tests; `pnpm run build` proves it bundles.
 
 ## Status
 
-**v1.0.0 — in daily use.** That is what the version number is for, and it is the
-only thing that could have set it: nothing in the tooling promotes an app to 1.0
-on its own.
+**v1.0.0 — in daily use on Windows.** That is what the version number is for,
+and it is the only thing that could have set it: nothing in the tooling promotes
+an app to 1.0 on its own.
 
 The web layer is built and tested (613 unit tests plus 106 end-to-end tests
 driving the real card in a browser), and the Rust layer compiles clean — `cargo
@@ -414,12 +414,19 @@ the vault path resolves per-platform, and the two places that do differ (the
 Dock-less menu-bar app on macOS, transparency needing the macOS private-API
 flag) are handled.
 
-"Known unknowns" in [`docs/future-work.md`](docs/future-work.md) is narrower
-than it was but not empty. Those questions — the tray, window positioning,
-transparency, launch-at-login, and whether the card takes keyboard focus under
-Windows' foreground-activation rules — are answered by running the app, and
-running it answers them **for one OS at a time**. On any platform this hasn't
-been used on, they are still reviewed-but-unrun.
+On Windows the desktop behaviour is verified by use rather than by reasoning:
+the card takes keyboard focus when a timer fires (the one open question that
+could have forced a design change), transparency and always-on-top behave,
+every tray menu item reaches the webview, launch-at-login registers, and the
+clipboard copies work from a hidden window.
+
+**macOS and Linux have never been run.** Both bundle, and the platform-specific
+code is written and reviewed, but transparency on macOS fails _silently_ if the
+private-API pair is ever separated, and Linux transparency needs a compositing
+window manager. "Known unknowns" in
+[`docs/future-work.md`](docs/future-work.md) lists what to check on each,
+along with the two questions Windows use didn't answer either: multi-monitor
+mixed-DPI placement, and the 24-hour time picker outside a US locale.
 
 ## License
 
