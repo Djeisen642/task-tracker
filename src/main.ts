@@ -712,6 +712,15 @@ class CheckInController {
       void this.loadTeamMember(team.personInput.value);
     });
 
+    // Picking from the datalist commits on `change` but does not fire Enter — load
+    // immediately when the value is a report that already has a file, so Open is
+    // not a second step after selecting from the suggestions.
+    team.personInput.addEventListener('change', () => {
+      const handle = team.personInput.value.trim().replace(/^@/, '').toLowerCase();
+      const known = Array.from(team.peopleList.options, (option) => option.value);
+      if (known.includes(handle)) void this.loadTeamMember(handle);
+    });
+
     // Keyboard-first, like the rest of the app: no need to reach for the mouse
     // to open a report you just typed.
     team.personInput.addEventListener('keydown', (event) => {
