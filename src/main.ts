@@ -576,6 +576,16 @@ class CheckInController {
   private teamStandalone = false;
   /** The report currently loaded in the Team panel, or `null` when none is. */
   private teamMember: TeamMemberDocument | null = null;
+  /**
+   * The handle the Team panel is showing, or fetching, or `null` for neither.
+   *
+   * Not `teamMember.person`: that comes from the file's frontmatter, which a
+   * hand edit can spell differently from the handle it was opened under. This
+   * is the handle the panel was actually asked for, which is what the `change`
+   * listener has to compare against, and it doubles as the token that keeps a
+   * slow load from painting over a newer one.
+   */
+  private teamHandle: string | null = null;
   private teamStatusTimer: number | undefined;
   /**
    * `true` when the window is at `EXPANDED_SIZE` rather than `COMPACT_SIZE`.
@@ -717,6 +727,15 @@ class CheckInController {
     // not a second step after selecting from the suggestions.
     team.personInput.addEventListener('change', () => {
       const handle = team.personInput.value.trim().replace(/^@/, '').toLowerCase();
+
+      // `change` also fires on blur — including the blur from pressing a task's
+      // own button, since typing the handle counts as a change until then. A
+      // reload there rebuilds the list between mousedown and mouseup, so the
+      // pressed control is gone before the click lands and the press is
+      // silently swallowed. Skip a report already open or on its way; Enter and
+      // Open stay explicit refreshes.
+      if (handle === this.teamHandle) return;
+
       const known = Array.from(team.peopleList.options, (option) => option.value);
       if (known.includes(handle)) void this.loadTeamMember(handle);
     });
@@ -1219,6 +1238,7 @@ class CheckInController {
       this.elements.team.personInput.value = '';
       this.setTeamPersonError('');
       this.teamMember = null;
+      this.teamHandle = null;
       this.renderTeamMember();
 
       const panel = this.elements.team.panel;
@@ -1248,6 +1268,7 @@ class CheckInController {
   private hideTeamPanel(): void {
     this.teamOpen = false;
     this.teamMember = null;
+    this.teamHandle = null;
 
     const panel = this.elements.team.panel;
     panel.classList.remove('is-open');
@@ -1299,14 +1320,24 @@ class CheckInController {
     }
 
     this.setTeamPersonError('');
+    this.teamHandle = handle;
 
     try {
       await this.writes;
-      this.teamMember = await openTeamMember(this.vault, handle);
+      const member = await openTeamMember(this.vault, handle);
+
+      // Another handle was asked for while this one was being read, or the
+      // panel was closed. Either way this result is no longer what's wanted.
+      if (this.teamHandle !== handle) return;
+
+      this.teamMember = member;
       this.elements.team.personInput.value = handle;
       this.renderTeamMember();
       await this.refreshTeamPeopleList();
     } catch (error) {
+      // Let the same handle be tried again; a load for a different one that
+      // started meanwhile owns the field now, so leave it alone.
+      if (this.teamHandle === handle) this.teamHandle = null;
       await showError('Could not open that report', describeError(error));
     }
   }
