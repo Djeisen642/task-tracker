@@ -553,3 +553,47 @@ test('ticks one of two near-identical lines, not both', async ({ page }) => {
   expect(written).toContain('- [ ] Ship it');
   expect(written).toContain('- [/] ship it');
 });
+
+test('picking a tracked handle from the suggestions loads that report', async ({ page }) => {
+  await startApp(page, {
+    files: {
+      'team.greg.md': teamFile('greg', [{ title: 'Ship it', marker: ' ' }]),
+    },
+  });
+
+  await openTeam(page);
+
+  // A datalist pick commits the value and fires `change`; the native dropdown
+  // itself is browser chrome no driver can click, so this is the same event
+  // the real gesture delivers.
+  await page.evaluate(() => {
+    const input = document.getElementById('team-person-input') as HTMLInputElement;
+    input.value = 'greg';
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+
+  // Loaded with no second step — no Enter, no Open.
+  await expect(page.locator('#team-task-list .task-title')).toHaveText('Ship it');
+});
+
+test('a click on a task lands the first time after typing a handle', async ({ page }) => {
+  // Leaving the handle field fires `change` too, so the datalist auto-load used
+  // to reload the open report on the blur the click itself caused — rebuilding
+  // the list between mousedown and mouseup, and swallowing the press.
+  await startApp(page, {
+    files: {
+      'team.greg.md': teamFile('greg', [{ title: 'Ship it', marker: ' ' }]),
+    },
+  });
+
+  await openTeam(page);
+  await page.fill('#team-person-input', 'greg');
+  await page.press('#team-person-input', 'Enter');
+
+  const row = page.locator('#team-task-list .task').first();
+  await expect(row).toBeVisible();
+  await row.locator('.task-toggle').click();
+
+  await expect(row).toHaveClass(/is-in-progress/);
+  expect(await readVaultFile(page, 'team.greg.md')).toContain('- [/] Ship it');
+});
