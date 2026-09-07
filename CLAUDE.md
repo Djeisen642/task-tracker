@@ -112,6 +112,8 @@ e2e/
   expand.spec.ts        # The card's expand toggle
   capture.spec.ts       # Screenshots into docs/screenshots/
 scripts/
+  version.ts(.test)              # The version, derived from the commit subjects
+  commit-msg.ts                  # The hook that holds a subject to that grammar
   backfill-provenance.ts(.test)  # One-shot: reconstruct task `added` dates in a
                                  # pre-v2 vault. NOT app code — see below.
 docs/
@@ -310,6 +312,33 @@ docs/
   version newer than this build understands. Version 1 is the _absence_ of the
   key; never write `format: 1`. Bump the constant when the meaning of existing
   syntax changes, not when something is merely added.
+- **The version is derived from the commit subjects, and lives in four files at
+  once.** `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`
+  and the crate's entry in `src-tauri/Cargo.lock` all carry it, and nothing
+  failed when they disagreed — a Tauri installer reads `tauri.conf.json`, so the
+  number in Add/Remove Programs came from a different file than the one anybody
+  edited. `scripts/version.ts` is the single writer: it rewrites the _text_ of
+  each file rather than re-serializing it (a JSON round-trip that silently drops
+  a key from `tauri.conf.json` is a configuration bug with no error message),
+  throws unless it finds exactly one place to write, and `pnpm run version:check`
+  is part of `pnpm run check` so drift fails the same gate as everything else.
+  Anything that adds a fifth home for the version adds an entry to `FILES` too.
+- **`feat`/`fix`/`perf` move the number; nothing else does.** The `commit-msg`
+  hook enforces the Conventional Commits grammar because the version now depends
+  on it, and the failure mode without it is silent — the commit lands and the
+  version simply doesn't move. A week of `chore:` and `docs:` releases nothing on
+  purpose. Merge, revert and `fixup!` subjects are exempt — git wrote them.
+- **1.0 is set by hand; the tooling will not promote an app to it.** Below 1.0.0
+  `nextVersion` demotes a breaking change to a _minor_ bump, because declaring
+  1.0 is a statement that the app is finished enough to promise compatibility —
+  a person's decision, not something to fall out of a `!` in a subject line.
+  This app is past that now (the author set 1.0.0 on the strength of using it
+  daily), so the rule is inert here and a breaking change costs a major. Don't
+  delete it: it is what a fork starting from zero runs into. The other half of
+  that decision is `versionToRelease` — a version declared in `package.json`
+  but never tagged releases _as itself_ rather than being bumped past, which is
+  the only reason `v1.0.0` exists at all. Without it the first `fix:` after the
+  decision would have tagged `v1.0.1` over a version nobody ever shipped.
 - **A vault migration is a script, not a startup path.** `scripts/` is outside
   the app for a reason: the app touches one file at a time and has no evidence
   about what preceded it, whereas a migration reads the whole vault, derives
@@ -436,15 +465,18 @@ per package under `allowBuilds` so the expected skips are silent and a genuinely
 new one stands out. `pnpm approve-builds <pkg>` / `'!<pkg>'` writes that file for
 you, which beats guessing the key by hand.
 
-| Command                 | Purpose                                         |
-| ----------------------- | ----------------------------------------------- |
-| `pnpm install`          | Install deps + git hooks (`prepare` → lefthook) |
-| `pnpm run dev`          | Browser-only preview of the card (no Rust)      |
-| `pnpm run tauri dev`    | Full desktop app (needs Rust + Tauri prereqs)   |
-| `pnpm run check`        | format + lint + typecheck + test (the web gate) |
-| `pnpm run build`        | `tsc --noEmit` + `vite build`                   |
-| `pnpm run test:watch`   | Vitest in watch mode                            |
-| `pnpm run tauri icon X` | Regenerate the platform icon set from `X.png`   |
+| Command                  | Purpose                                         |
+| ------------------------ | ----------------------------------------------- |
+| `pnpm install`           | Install deps + git hooks (`prepare` → lefthook) |
+| `pnpm run dev`           | Browser-only preview of the card (no Rust)      |
+| `pnpm run tauri dev`     | Full desktop app (needs Rust + Tauri prereqs)   |
+| `pnpm run check`         | format + lint + typecheck + test (the web gate) |
+| `pnpm run build`         | `tsc --noEmit` + `vite build`                   |
+| `pnpm run test:watch`    | Vitest in watch mode                            |
+| `pnpm run tauri icon X`  | Regenerate the platform icon set from `X.png`   |
+| `pnpm run version:check` | Do the four files carrying the version agree?   |
+| `pnpm run version:next`  | The version the commits since the last tag earn |
+| `pnpm run version:sync`  | Write a version into all four of those files    |
 
 Run a one-shot script with Node's own type stripping — there is no bundler step
 for `scripts/`, and no `tsx` dependency:
@@ -494,21 +526,29 @@ Then all four gates run (~90s for the first `cargo check`; seconds after that).
 Verified in this sandbox. Don't conclude from the first error that Rust can only
 be checked in CI, and don't report the Rust gate as passing without running it.
 
-What this environment lacks is a **desktop webview and any real desktop machine**
-(no Windows, no macOS), so the following are _reviewed for correctness but never
-executed_. Verify each on real hardware before trusting it. The full list lives in `docs/future-work.md`
-under "Known unknowns"; the headlines:
+What this environment lacks is a **desktop webview and any real desktop
+machine**. That does not mean nothing here is verified — it means _this sandbox_
+cannot verify it, and the author's daily use can.
 
-- **Windows foreground activation.** `SetForegroundWindow` is refused for a
-  process that hasn't received recent user input — exactly a timer firing at
-  14:00. `show()` + `set_focus()` + `request_user_attention()` is the mitigation,
-  but whether the card lands _focused and ready to type_ is the most important
-  thing to test on-device.
-- **The transparent, always-on-top, `skipTaskbar` window** behaving as configured
-  on Windows 11, including top-left placement on a multi-monitor, mixed-DPI setup.
-- **Tray icon + menu** rendering, and each item's event reaching the webview.
-- **The autostart plugin** registering at login, and clipboard writes from a
-  hidden window.
+**Windows is verified by use, and that is load-bearing.** Foreground activation,
+the transparent always-on-top `skipTaskbar` window, the tray icon and every menu
+item's event, launch-at-login, clipboard writes from a hidden window, and
+`setSize` against `resizable: false` all work on Windows 11. Treat that as
+regression surface, not as licence: `show()` + `set_focus()` +
+`request_user_attention()` is the sequence that makes a timer firing at 14:00
+land focused and ready to type, and `SetForegroundWindow` is refused for a
+process that hasn't had recent user input — so don't reorder or thin that
+sequence because a refactor makes it look redundant. Nothing in this sandbox
+will tell you when you've broken it.
 
-When you touch any of the above, say explicitly in your summary that it is
-reviewed-but-unrun, and list what the user must check on-device.
+**macOS and Linux have never been run**, and neither has a multi-monitor
+mixed-DPI setup. Those remain _reviewed for correctness but never executed_ —
+the full list is in `docs/future-work.md` under "Known unknowns". The macOS one
+to fear is silent: transparency needs `macOSPrivateApi` in `tauri.conf.json`
+_and_ the `macos-private-api` Cargo feature, and with only one of them the card
+paints opaque with nothing in lint, tests or a Linux build saying a word.
+
+When you touch anything in that second group, say explicitly in your summary
+that it is reviewed-but-unrun, and list what the user must check on-device. When
+you touch something in the first, say which platform it is verified on — "works
+on Windows" is a different claim from "works".
