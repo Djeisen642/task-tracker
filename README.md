@@ -179,6 +179,21 @@ Windows and macOS need no equivalent: WebView2 ships with Windows 11, and the
 macOS webview is WebKit. macOS additionally needs the Xcode command line tools
 (`xcode-select --install`), which you likely already have if Rust works.
 
+On a fresh Mac, that's:
+
+```bash
+xcode-select --install                        # Xcode command line tools
+brew install rustup-init && rustup-init -y     # Rust toolchain, if you don't have one
+corepack enable && corepack prepare pnpm@<pinned version> --activate
+
+pnpm install
+pnpm run tauri dev    # the real desktop app — tray icon, transparent window, the works
+```
+
+Check `packageManager` in `package.json` for the pinned pnpm version. No system
+libraries to install first, unlike Linux above — WebKit and the menu bar come
+from macOS itself.
+
 Settings are edited from the **gear on the check-in card** or **Settings…** in
 the tray, and persist to `settings.json` in the app config directory:
 
