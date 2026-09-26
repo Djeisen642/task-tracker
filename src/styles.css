@@ -79,17 +79,22 @@ body {
   background: var(--surface);
   border: 1px solid var(--edge);
   border-radius: var(--radius);
+  /* The inset line is a faint top-edge highlight, the way glass reads light in
+     Fluent/macOS-style materials — purely additive over the flat fallback. */
   box-shadow:
     0 18px 50px rgb(0 0 0 / 45%),
-    0 2px 8px rgb(0 0 0 / 30%);
+    0 2px 8px rgb(0 0 0 / 30%),
+    inset 0 1px 0 rgb(255 255 255 / 8%);
 
   /* Frosted glass where the platform supports it; the solid surface above is
      the fallback, so this is purely additive. */
   backdrop-filter: blur(22px) saturate(140%);
 
-  /* Start off-stage to the left. `.is-open` brings it in. */
+  /* Start off-stage to the left, slightly undersized so the entrance settles
+     into place rather than just sliding — the same easing that already
+     overshoots (`--ease-out`'s control points exceed 1) sells a soft spring. */
   opacity: 0;
-  transform: translateX(-110%);
+  transform: translateX(-110%) scale(0.97);
   transition:
     transform var(--enter-duration) var(--ease-out),
     opacity calc(var(--enter-duration) * 0.6) ease-out;
@@ -98,7 +103,7 @@ body {
 
 .card.is-open {
   opacity: 1;
-  transform: translateX(0);
+  transform: translateX(0) scale(1);
 }
 
 /* --------------------------------------------------------------------- head */
@@ -173,6 +178,37 @@ body {
   padding: 7px 9px;
   border-radius: var(--radius-sm);
   transition: background-color 140ms ease-out;
+  /*
+   * The list is rebuilt from scratch on every render (see `render()` in
+   * main.ts), so every row is a fresh node each time — this plays on every
+   * add/toggle/remove, not just on first load. Kept short and small enough
+   * (200ms, 4px) that a refresh reads as a soft settle rather than a flicker.
+   * `backwards` holds the 0%-keyframe state through the staggered delay below
+   * instead of flashing at full opacity first.
+   */
+  animation: fade-in-up 200ms var(--ease-out) backwards;
+}
+
+/* A light cascade rather than every row appearing at once — capped at a
+   handful of rows so a long list doesn't turn into a slow reveal. */
+.task:nth-child(2) {
+  animation-delay: 25ms;
+}
+
+.task:nth-child(3) {
+  animation-delay: 50ms;
+}
+
+.task:nth-child(4) {
+  animation-delay: 75ms;
+}
+
+.task:nth-child(5) {
+  animation-delay: 100ms;
+}
+
+.task:nth-child(n + 6) {
+  animation-delay: 125ms;
 }
 
 .task:hover {
@@ -202,6 +238,10 @@ body {
 
 .task-toggle:hover {
   transform: scale(1.12);
+}
+
+.task-toggle:active {
+  transform: scale(0.9);
 }
 
 .task-toggle:focus-visible,
@@ -286,11 +326,17 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  transition: color 140ms ease-out;
+  transition:
+    color 140ms ease-out,
+    transform 120ms ease-out;
 }
 
 .task-move:hover:not(.is-off) {
   color: var(--ink);
+}
+
+.task-move:active:not(.is-off) {
+  transform: scale(0.85);
 }
 
 /*
@@ -324,7 +370,9 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  transition: color 140ms ease-out;
+  transition:
+    color 140ms ease-out,
+    transform 120ms ease-out;
 }
 
 .task-priority.is-set {
@@ -333,6 +381,10 @@ body {
 
 .task-priority:hover:not(.is-off) {
   color: var(--ink);
+}
+
+.task-priority:active:not(.is-off) {
+  transform: scale(0.85);
 }
 
 /* Full list: the star stays faint, and its tooltip explains why it won't take. */
@@ -383,17 +435,26 @@ body {
   background: none;
   border: none;
   cursor: pointer;
-  transition: color 140ms ease-out;
+  transition:
+    color 140ms ease-out,
+    transform 120ms ease-out;
 }
 
 .task-remove:hover {
   color: var(--ink);
 }
 
+.task-remove:active {
+  transform: scale(0.85);
+}
+
 .empty-state {
   margin: 8px 0;
   font-size: 12.5px;
   color: var(--ink-faint);
+  /* The list has nothing else animating in when it's empty, so this is the
+     one moment this state benefits from the same soft settle as a task row. */
+  animation: fade-in-up 220ms var(--ease-out) backwards;
 }
 
 /* -------------------------------------------------------------------- entry */
@@ -450,12 +511,17 @@ body {
   cursor: pointer;
   transition:
     background-color 140ms ease-out,
-    color 140ms ease-out;
+    color 140ms ease-out,
+    transform 120ms ease-out;
 }
 
 .entry-button:hover {
   color: var(--ink);
   background: var(--surface-hover);
+}
+
+.entry-button:active {
+  transform: scale(0.95);
 }
 
 /* --------------------------------------------------------------------- foot */
@@ -476,15 +542,19 @@ body {
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: transform 140ms var(--ease-out);
+  transition:
+    transform 140ms var(--ease-out),
+    box-shadow 140ms ease-out;
 }
 
 .primary-button:hover {
   transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgb(91 134 245 / 35%);
 }
 
 .primary-button:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.97);
+  box-shadow: none;
 }
 
 .ghost-button,
@@ -499,13 +569,19 @@ body {
   cursor: pointer;
   transition:
     color 140ms ease-out,
-    background-color 140ms ease-out;
+    background-color 140ms ease-out,
+    transform 120ms ease-out;
 }
 
 .ghost-button:hover,
 .icon-button:hover {
   color: var(--ink);
   background: var(--surface-raised);
+}
+
+.ghost-button:active,
+.icon-button:active {
+  transform: scale(0.95);
 }
 
 .icon-button {
@@ -539,11 +615,15 @@ body {
   white-space: nowrap;
   color: var(--ink-faint);
   opacity: 0;
-  transition: opacity 200ms ease-out;
+  transform: translateY(3px);
+  transition:
+    opacity 200ms ease-out,
+    transform 200ms var(--ease-out);
 }
 
 .status.is-visible {
   opacity: 1;
+  transform: translateY(0);
 }
 
 /* ----------------------------------------------------------------- settings */
@@ -568,11 +648,13 @@ body {
   border-radius: var(--radius);
   box-shadow:
     0 18px 50px rgb(0 0 0 / 45%),
-    0 2px 8px rgb(0 0 0 / 30%);
+    0 2px 8px rgb(0 0 0 / 30%),
+    inset 0 1px 0 rgb(255 255 255 / 8%);
   backdrop-filter: blur(22px) saturate(140%);
 
+  /* Same entrance as `.card` — see the note there on the scale. */
   opacity: 0;
-  transform: translateX(-110%);
+  transform: translateX(-110%) scale(0.97);
   transition:
     transform var(--enter-duration) var(--ease-out),
     opacity calc(var(--enter-duration) * 0.6) ease-out;
@@ -590,7 +672,7 @@ body {
 
 .settings.is-open {
   opacity: 1;
-  transform: translateX(0);
+  transform: translateX(0) scale(1);
 }
 
 .settings-head {
@@ -711,12 +793,17 @@ label.field-joiner {
   transition:
     color 140ms ease-out,
     background-color 140ms ease-out,
-    border-color 140ms ease-out;
+    border-color 140ms ease-out,
+    transform 120ms ease-out;
 }
 
 .day-toggle:hover {
   color: var(--ink);
   background: var(--surface-hover);
+}
+
+.day-toggle:active {
+  transform: scale(0.95);
 }
 
 .day-toggle[aria-pressed='true'] {
@@ -817,6 +904,7 @@ label.field-joiner {
   background: var(--surface-raised);
   border-radius: var(--radius-sm);
   overflow-wrap: anywhere;
+  animation: fade-in-up 200ms var(--ease-out) backwards;
 }
 
 .team-note-date {
@@ -847,6 +935,16 @@ label.field-joiner {
   }
 }
 
+/* Shared by `.task`, `.empty-state` and `.team-note` — every one of them is a
+   fresh node on every render (see `replaceChildren` in main.ts), so this is
+   what plays whenever a list repaints, not just on first appearance. */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
 /*
  * Respect the OS setting. An app that interrupts you every hour has no business
  * also ignoring your motion preferences — the card still appears, it just stops
@@ -868,8 +966,32 @@ label.field-joiner {
     animation: none;
   }
 
-  .task-toggle:hover,
-  .primary-button:hover {
+  .task,
+  .empty-state,
+  .team-note {
+    animation: none;
+  }
+
+  .status {
     transform: none;
+    transition: opacity 200ms ease-out;
+  }
+
+  .task-toggle:hover,
+  .task-toggle:active,
+  .task-move:active,
+  .task-priority:active,
+  .task-remove:active,
+  .primary-button:hover,
+  .primary-button:active,
+  .ghost-button:active,
+  .icon-button:active,
+  .entry-button:active,
+  .day-toggle:active {
+    transform: none;
+  }
+
+  .primary-button:hover {
+    box-shadow: none;
   }
 }
