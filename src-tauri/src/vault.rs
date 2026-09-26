@@ -145,7 +145,12 @@ fn ensure_dir(dir: &Path) -> Result<(), String> {
 /// a reader sees either the old file or the complete new one, never a half of
 /// each.
 fn write_atomic(path: &Path, contents: &str) -> Result<(), String> {
-    let temp = path.with_extension("md.tmp");
+    // `<name>.tmp` beside the target, whatever its extension: the same file for
+    // a day file (`2026-09-25.md.tmp`) as before, and a sensible one for
+    // `settings.json` now that it goes through here too.
+    let mut temp_name = path.file_name().unwrap_or_default().to_os_string();
+    temp_name.push(".tmp");
+    let temp = path.with_file_name(temp_name);
 
     fs::write(&temp, contents)
         .map_err(|err| format!("Could not write {}: {err}", temp.display()))?;
@@ -272,12 +277,16 @@ pub fn settings_save<R: Runtime>(app: AppHandle<R>, contents: String) -> Result<
         ensure_dir(parent)?;
     }
 
-    fs::write(&path, contents).map_err(|err| format!("Could not save {}: {err}", path.display()))
+    // Atomic like the vault: this file holds the vault's location, and a crash
+    // or a full disk mid-write must leave the old settings, not half of new ones.
+    write_atomic(&path, &contents)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_person_handle, is_safe_name};
+    use super::{is_person_handle, is_safe_name, write_atomic};
+    use std::fs;
+    use std::path::PathBuf;
 
     #[test]
     fn accepts_the_filenames_the_app_writes() {
@@ -349,5 +358,29 @@ mod tests {
         assert!(!is_person_handle("-alice"));
         assert!(!is_person_handle("alice-"));
         assert!(!is_person_handle("al ice"));
+    }
+
+    /// A fresh directory per test, under the system temp dir.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("task-tracker-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn write_atomic_replaces_the_file_and_leaves_no_temp_behind() {
+        let dir = scratch("atomic");
+        for name in ["2026-09-25.md", "settings.json"] {
+            let path = dir.join(name);
+            write_atomic(&path, "old").unwrap();
+            write_atomic(&path, "new").unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), "new");
+            assert!(
+                !dir.join(format!("{name}.tmp")).exists(),
+                "{name}.tmp left behind"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 }

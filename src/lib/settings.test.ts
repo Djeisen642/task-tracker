@@ -6,6 +6,7 @@ import {
   MAX_SNOOZE_MINUTES,
   MIN_SNOOZE_MINUTES,
   parseSettings,
+  readSettingsFile,
   serializeSettings,
   toDraft,
   toggleWorkDay,
@@ -355,5 +356,54 @@ describe('applyDraft', () => {
   it('produces settings that survive a save/load round trip', () => {
     const next = applyDraft(DEFAULT_SETTINGS, draft({ workStart: '06:00', snoozeMinutes: '45' }));
     expect(parseSettings(JSON.parse(serializeSettings(next)))).toEqual(next);
+  });
+});
+
+describe('readSettingsFile', () => {
+  it('starts a first launch on the defaults, free to save', () => {
+    expect(readSettingsFile(null)).toEqual({
+      settings: DEFAULT_SETTINGS,
+      extra: {},
+      writable: true,
+    });
+  });
+
+  it('reads a real file and keeps the keys it does not know', () => {
+    const file = readSettingsFile(
+      JSON.stringify({ workStart: '08:00', workEnd: '16:00', futureOption: true }),
+    );
+    expect(file.writable).toBe(true);
+    expect(file.settings.workStart).toBe('08:00');
+    expect(file.extra).toEqual({ futureOption: true });
+  });
+
+  // Regression: an unreadable file used to run on the defaults silently, and
+  // the next save from the panel wrote them over the real file, vault
+  // location included.
+  it('runs on the defaults but refuses to save over a file that is not settings', () => {
+    for (const raw of ['{"workStart": "08:00"', 'not json', '[]', 'null', '42']) {
+      const file = readSettingsFile(raw);
+      expect(file.writable).toBe(false);
+      expect(file.settings).toEqual(DEFAULT_SETTINGS);
+    }
+  });
+});
+
+describe('serializeSettings with extra keys', () => {
+  it('writes back what this build did not understand', () => {
+    const file = readSettingsFile(JSON.stringify({ ...DEFAULT_SETTINGS, theme: 'dark' }));
+    const saved = JSON.parse(serializeSettings(file.settings, file.extra)) as Record<
+      string,
+      unknown
+    >;
+    expect(saved.theme).toBe('dark');
+    expect(saved.workStart).toBe(DEFAULT_SETTINGS.workStart);
+  });
+
+  it('never lets an unknown key override a real setting', () => {
+    const saved = JSON.parse(
+      serializeSettings({ ...DEFAULT_SETTINGS, workStart: '07:30' }, { workStart: '12:00' }),
+    ) as Record<string, unknown>;
+    expect(saved.workStart).toBe('07:30');
   });
 });

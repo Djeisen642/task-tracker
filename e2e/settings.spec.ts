@@ -239,3 +239,38 @@ test('reopening after a save shows the saved values', async ({ page }) => {
   await expect(page.locator('#snooze-minutes')).toHaveValue('5');
   await expect(page.locator('#hourly-enabled')).not.toBeChecked();
 });
+
+// Regression: an unreadable settings file used to run on the defaults
+// silently (a console.warn in a hidden window), and saving from the panel then
+// wrote those defaults, vault location included, over the real file.
+test('says so when the settings file cannot be read, and never saves over it', async ({ page }) => {
+  const broken = '{"workStart": "07:00", "vaultDir": "D:\\\\Notes"';
+  const dialogs: string[] = [];
+  page.on('dialog', (dialog) => {
+    dialogs.push(dialog.message());
+    void dialog.dismiss();
+  });
+
+  await startApp(page, { settingsText: broken });
+  await expect.poll(() => dialogs.length).toBeGreaterThan(0);
+  expect(dialogs[0]).toContain('default vault folder');
+
+  await openSettings(page);
+  await page.fill('#work-start', '08:15');
+  await page.click('#settings-save');
+  await expect.poll(() => dialogs.length).toBeGreaterThan(1);
+
+  const raw = await page.evaluate(() => localStorage.getItem('task-tracker:settings'));
+  expect(raw).toBe(broken);
+});
+
+test('keeps settings it does not recognize through a save', async ({ page }) => {
+  await startApp(page, { settings: { futureOption: 'kept' } });
+  await openSettings(page);
+
+  await page.fill('#work-start', '08:15');
+  await page.click('#settings-save');
+  await expect(page.locator('#settings')).toBeHidden();
+
+  expect(await readSettings(page)).toMatchObject({ workStart: '08:15', futureOption: 'kept' });
+});

@@ -164,9 +164,51 @@ export function parseSettings(input: unknown): Settings {
   return settings;
 }
 
-/** Serialize settings for `settings.json`. */
-export function serializeSettings(settings: Settings): string {
-  return `${JSON.stringify(settings, null, 2)}\n`;
+/** What reading `settings.json` found, and whether it is safe to write back. */
+export interface SettingsFile {
+  readonly settings: Settings;
+  /**
+   * Keys this build doesn't know (a newer version's, a hand edit's), kept so a
+   * save writes them back instead of silently deleting them.
+   */
+  readonly extra: Readonly<Record<string, unknown>>;
+  /**
+   * `false` when the file exists but isn't a settings object at all. The app
+   * still starts on the defaults, but must not save them over the file:
+   * that would replace the user's real settings, vault location included,
+   * with defaults-plus-one-change.
+   */
+  readonly writable: boolean;
+}
+
+/** Read the file's text; `null` (no file yet) is a first launch. */
+export function readSettingsFile(raw: string | null): SettingsFile {
+  if (raw === null) return { settings: { ...DEFAULT_SETTINGS }, extra: {}, writable: true };
+
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return { settings: { ...DEFAULT_SETTINGS }, extra: {}, writable: false };
+  }
+  if (typeof json !== 'object' || json === null || Array.isArray(json)) {
+    return { settings: { ...DEFAULT_SETTINGS }, extra: {}, writable: false };
+  }
+
+  const known = new Set<string>(Object.keys(DEFAULT_SETTINGS));
+  const extra = Object.fromEntries(Object.entries(json).filter(([key]) => !known.has(key)));
+  return { settings: parseSettings(json), extra, writable: true };
+}
+
+/**
+ * Serialize settings for `settings.json`. `extra` is whatever the file held
+ * that this build doesn't know; it goes back untouched.
+ */
+export function serializeSettings(
+  settings: Settings,
+  extra: Readonly<Record<string, unknown>> = {},
+): string {
+  return `${JSON.stringify({ ...extra, ...settings }, null, 2)}\n`;
 }
 
 /* ------------------------------------------------------------------ the form */
