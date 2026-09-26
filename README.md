@@ -452,3 +452,7 @@ mixed-DPI placement, and the 24-hour time picker outside a US locale.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+The bundled UI font, [Inter](https://rsms.me/inter/), is licensed separately
+under the SIL Open Font License 1.1 — see
+[`src/assets/fonts/OFL.txt`](src/assets/fonts/OFL.txt).
