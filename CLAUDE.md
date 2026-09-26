@@ -358,7 +358,16 @@ docs/
   derived span actually is.
 - **Writes are atomic and serialized.** Rust writes to a temp file and renames
   (a day file is the only copy of that day's notes); `main.ts` chains every save
-  through `this.writes` so concurrent edits can't interleave.
+  through `this.writes` so concurrent edits can't interleave. `settings.json`
+  goes through the same `write_atomic` since it holds the vault's location; it
+  used to be a plain `fs::write`.
+- **One copy of the app, ever (`tauri-plugin-single-instance`).** `this.writes`
+  serializes one process's saves, and nothing serializes two processes: a
+  second copy (a double-click, launch-at-login plus a manual start) meant two
+  cards and two writers on today's file. A second launch now hands off to the
+  first, which opens its card as "Check in now" does, and exits. Registered
+  first, per the plugin's docs. Found by the sibling app-status-tracker's
+  review.
 - **The check-in window takes focus.** Unlike the sibling calendar overlay, this
   one is typed into — so it is _not_ click-through, and it deliberately occupies
   the **top-left** corner, because bottom-right belongs to
@@ -372,10 +381,18 @@ docs/
 - **The scheduler does not prompt over the settings panel.** `tick()` returns
   early while it is open. Slots coalesce, so the check-in is served as soon as
   the panel closes rather than being lost.
-- **The form validates; the file falls back.** `parseSettings` silently repairs
-  a corrupt `settings.json` so the app always starts. `validateDraft` does the
-  opposite — it reports, because a settings panel that silently reverts what you
-  typed teaches you nothing. Don't collapse the two.
+- **The form validates; the file falls back, but loudly, and is never saved
+  over.** `parseSettings` repairs a hand-edited `settings.json` per field so the
+  app always starts. `validateDraft` does the opposite — it reports, because a
+  settings panel that silently reverts what you typed teaches you nothing.
+  Don't collapse the two. What the file-side fallback must _not_ be is silent
+  and destructive, and it was both: an unreadable file (a sync client or
+  antivirus holding it, or one that isn't JSON) ran on the defaults, which
+  include the **vault location**, with only a `console.warn` in a hidden window,
+  and the next save from the panel wrote those defaults over it. Now
+  `readSettingsFile` reports `writable: false`, a dialog says the default vault
+  folder is in use, and `saveSettings` refuses. Keys this build doesn't know are
+  kept (`extra`) and written back, never stripped by an unrelated save.
 - **`settings.json` is written before the in-memory settings change**, so a
   failed write leaves the running app on the values actually on disk. Launch-at-
   login is OS state applied after, and its failure doesn't undo the save.
@@ -441,7 +458,10 @@ Each one is applied here; don't undo them.
   `bundle.icon` or Windows/macOS bundling fails, and `tauri icon` overwrites the
   hand-tuned sizes every time it runs. See `src-tauri/icons/README.md`.
 - **A status line refreshed only on events is a stale snapshot.** The tray text
-  re-renders on the scheduler tick and pushes only when it changed.
+  re-renders on the scheduler tick and pushes only when it changed, and
+  "changed" is measured against what the tray _accepted_: remembering the line
+  before `setTrayStatus` resolved meant one failure left the tray stale until
+  the text next changed.
 - **A flag set after an `await` is not a guard.** `presenting` is raised
   synchronously before the vault read, because `visible` is set after it — the
   sibling shipped a double-present race of exactly this shape.

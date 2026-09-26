@@ -31,6 +31,11 @@ serde_json = "1"
 # Launch-at-login is desktop-only; the plugin does not build for mobile targets.
 [target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
 tauri-plugin-autostart = "2"
+# One copy of the app, ever. Two copies meant two check-in cards and two
+# writers on today's day file, which is the only copy of those notes: each
+# serializes its own writes, but nothing serializes them against each other.
+# The second launch hands off to the first (which opens its card) and exits.
+tauri-plugin-single-instance = "2"
 
 [features]
 # This feature is used by the CLI for production builds.

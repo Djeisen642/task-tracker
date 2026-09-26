@@ -48,7 +48,7 @@ import {
   applyDraft,
   DAY_LABELS,
   DEFAULT_SETTINGS,
-  parseSettings,
+  readSettingsFile,
   serializeSettings,
   toDraft,
   toggleWorkDay,
@@ -552,6 +552,10 @@ class CheckInController {
   private readonly elements: Elements;
 
   private settings: Settings = { ...DEFAULT_SETTINGS };
+  /** Keys in settings.json this build doesn't know, written back on save. */
+  private settingsExtra: Readonly<Record<string, unknown>> = {};
+  /** `false` when settings.json couldn't be read: the defaults run, and nothing is saved over it. */
+  private settingsWritable = true;
   private state: CheckInState = { ...INITIAL_CHECK_IN_STATE };
   /** The day currently loaded in the card, or `null` when nothing is open. */
   private day: DayDocument | null = null;
@@ -860,15 +864,31 @@ class CheckInController {
     }
   }
 
+  /**
+   * Read `settings.json`, and say so if it can't be.
+   *
+   * A settings file that is unreadable (a sync client or antivirus holding it)
+   * or isn't settings at all must not stop the app from starting, so the
+   * defaults run. But that is not silent any more, and not harmless: the
+   * defaults include the *vault location*, so a custom vault quietly swapped
+   * for `Documents/TaskTracker` for the day. It used to be a `console.warn` in
+   * a hidden window, and saving from the panel then wrote the defaults over the
+   * real file. Now the user is told, and `saveSettings` refuses.
+   */
   private async loadSettings(): Promise<void> {
+    let problem: string | null = null;
     try {
-      const raw = await loadSettingsJson();
-      this.settings = raw === null ? { ...DEFAULT_SETTINGS } : parseSettings(JSON.parse(raw));
+      const file = readSettingsFile(await loadSettingsJson());
+      this.settings = file.settings;
+      this.settingsExtra = file.extra;
+      this.settingsWritable = file.writable;
+      if (!file.writable) problem = 'settings.json isn’t valid settings.';
     } catch (error) {
-      // A corrupt settings file must not stop the app from starting.
-      console.warn('Falling back to default settings:', describeError(error));
       this.settings = { ...DEFAULT_SETTINGS };
+      this.settingsWritable = false;
+      problem = describeError(error);
     }
+    if (problem !== null) await showError(SETTINGS_UNREADABLE, problem);
   }
 
   private async registerTrayHandlers(): Promise<void> {
@@ -1121,8 +1141,13 @@ class CheckInController {
 
     const next = applyDraft(this.settings, draft);
 
+    if (!this.settingsWritable) {
+      await showError('Could not save your settings', SETTINGS_UNREADABLE);
+      return;
+    }
+
     try {
-      await saveSettingsJson(serializeSettings(next));
+      await saveSettingsJson(serializeSettings(next, this.settingsExtra));
     } catch (error) {
       await showError('Could not save your settings', describeError(error));
       return;
@@ -1873,8 +1898,11 @@ class CheckInController {
       const text = formatTrayStatus(day);
       if (text === this.lastTrayStatus) return;
 
-      this.lastTrayStatus = text;
       await setTrayStatus(text);
+      // Only once the tray took it: remembered before the call, one failure
+      // left the tray stale until the text next changed, since every retry
+      // then matched and returned early.
+      this.lastTrayStatus = text;
     } catch {
       // The tray line is cosmetic; a failure here is not worth a dialog.
     }
@@ -1890,6 +1918,10 @@ class CheckInController {
     }, STATUS_HOLD_MS);
   }
 }
+
+/** Why settings can't be saved, shown at launch and when saving is refused. */
+const SETTINGS_UNREADABLE =
+  'Your settings file couldn’t be read, so Task Tracker is running on the defaults, including the default vault folder. Your settings won’t be saved over it: fix or remove settings.json, then restart.';
 
 const controller = new CheckInController(createVault(), resolveElements());
 void controller.start().catch(async (error: unknown) => {

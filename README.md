@@ -212,10 +212,16 @@ that file, and shows the active vault path read-only — pointing it somewhere
 else still means editing `vaultDir` by hand, because a folder picker needs a
 capability the app doesn't currently ask for.
 
-Editing the file directly still works. A corrupt or partial `settings.json` is
-silently repaired to defaults so the app always starts; the panel does the
-opposite and reports what's wrong, because a form that quietly reverts what you
-typed teaches you nothing.
+Editing the file directly still works. A partial or out-of-range value is
+repaired to its default so the app always starts; the panel does the opposite
+and reports what's wrong, because a form that quietly reverts what you typed
+teaches you nothing. A file that can't be read at all (locked by a sync client,
+or not valid JSON) is different: the app says so in a dialog, runs on the
+defaults (including the default vault folder) and won't save over the file
+until it's fixed. Settings it doesn't recognize are kept through a save.
+
+Only one copy of Task Tracker runs: launching it again opens the check-in card
+of the copy already in the tray.
 
 ## How it interrupts you
 

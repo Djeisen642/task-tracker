@@ -288,6 +288,11 @@ agent doesn't attempt the within-file comparison that cannot work.
 
 ## Known unknowns
 
+- **Single instance, on a real machine.** `tauri-plugin-single-instance` hands a
+  second launch to the first (a named mutex on Windows, D-Bus on Linux). Launch
+  the app twice: there should be one tray icon, and the second launch should
+  open the first one's check-in card.
+
 The Rust compiles and its tests pass — `cargo check`, `cargo test`, `cargo
 clippy --all-targets -- -D warnings` and `cargo fmt --check` were all run
 against this tree, and `Cargo.lock` is committed.

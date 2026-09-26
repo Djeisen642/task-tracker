@@ -49,7 +49,16 @@ fn request_attention(window: WebviewWindow) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // First, per the plugin's docs: a second launch must hand off before any
+    // other plugin or window starts. It asks this copy for the check-in card,
+    // exactly as the tray's "Check in now" does.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        let _ = app.emit("check-in-now", ());
+    }));
+
+    builder
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())

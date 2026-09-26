@@ -22,6 +22,8 @@ export interface SeedOptions {
   now?: Date;
   /** Settings overrides, merged over a standard 09:00–17:00 weekday. */
   settings?: Record<string, unknown>;
+  /** The settings file's raw text instead, for one that isn't valid settings. */
+  settingsText?: string;
   /** Vault files keyed by name, e.g. `{ '2026-07-31.md': '…' }`. */
   files?: Record<string, string>;
 }
@@ -60,7 +62,7 @@ export async function startApp(page: Page, options: SeedOptions = {}): Promise<v
     {
       settingsKey: SETTINGS_KEY,
       vaultPrefix: VAULT_PREFIX,
-      settingsJson: JSON.stringify(settings),
+      settingsJson: options.settingsText ?? JSON.stringify(settings),
       files: options.files ?? {},
     },
   );
