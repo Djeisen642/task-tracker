@@ -449,6 +449,11 @@ body {
   min-width: 0;
   line-height: 1.35;
   overflow-wrap: anywhere;
+  /* Re-enable selection over the body-wide `user-select: none` — a task's
+     text is exactly the kind of content someone wants to copy out, unlike
+     the chrome around it (buttons, the rank badge). */
+  user-select: text;
+  cursor: text;
 }
 
 .task.is-completed .task-title {
