@@ -6,7 +6,7 @@
  * the browser dev loop. Everything above this line is pure and testable.
  */
 
-import { addDays, fromDateKey, isDateKey, toDateKey, type Clock, type DateKey } from './dates.ts';
+import { isDateKey, toDateKey, type Clock, type DateKey } from './dates.ts';
 import { createDay, parseDay, serializeDay, type DayDocument } from './markdown/day.ts';
 import {
   createTeamMember,
@@ -89,45 +89,6 @@ export function previousDayKey(keys: readonly DateKey[], date: DateKey): DateKey
   return best;
 }
 
-/**
- * How many working days may go by, unlogged, before a list stops carrying over.
- *
- * Bounded on purpose. Returning from a two-week holiday should not resurrect a
- * fortnight-stale to-do list into today's check-in; past this horizon the old
- * day file is still there to read, it just doesn't auto-populate. A whole
- * working week off still carries: that is a holiday you come back from
- * wanting to know where you left off.
- *
- * Counted in _working_ days, not calendar days. It was four calendar days,
- * which a weekend spends on its own: Friday's list didn't survive Monday and
- * Tuesday of PTO, and neither did Thursday's survive an ordinary Friday off.
- */
-export const CARRY_OVER_HORIZON_WORKDAYS = 5;
-
-/**
- * `true` when `previous` is recent enough to carry tasks from `current`.
- *
- * `workDays` is `Date.getDay()` numbers, the same list the scheduler uses. Only
- * the days strictly between the two dates count, and only when they are working
- * days: the weekend, and a Friday-and-Saturday weekend, cost nothing.
- */
-export function withinCarryOverHorizon(
-  previous: DateKey,
-  current: DateKey,
-  workDays: readonly number[],
-): boolean {
-  const from = fromDateKey(previous);
-  const to = fromDateKey(current);
-  if (from === null || to === null) return false;
-
-  let missed = 0;
-  for (let day = addDays(from, 1); day.getTime() < to.getTime(); day = addDays(day, 1)) {
-    if (workDays.includes(day.getDay())) missed += 1;
-    if (missed > CARRY_OVER_HORIZON_WORKDAYS) return false;
-  }
-  return true;
-}
-
 /** Read and parse a day file, or `null` if it doesn't exist. */
 export async function readDay(
   vault: VaultPort,
@@ -149,8 +110,14 @@ export async function writeDay(vault: VaultPort, day: DayDocument): Promise<void
 /**
  * Load today's file, creating it (seeded with carried-over tasks) if absent.
  *
- * The create path is where a workday actually begins: yesterday's unfinished
- * work becomes today's starting list, which is what the day-start prompt shows.
+ * The create path is where a workday actually begins: the last logged day's
+ * unfinished work becomes today's starting list, which is what the day-start
+ * prompt shows.
+ *
+ * It carries from the most recent earlier file however long ago that was. There
+ * used to be a horizon, and it failed exactly when carry-over matters: back from
+ * a fortnight off, an empty list is the worst answer to "where was I?", while a
+ * stale one is a few clicks to clear (each carried task keeps its `added` date).
  *
  * The ranking is normalized on the way out, and this is the only read that does
  * it — `readDay` stays faithful to the bytes on disk, because the rollups
@@ -165,16 +132,13 @@ export async function openDay(
   date: DateKey,
   workStart: Clock,
   workEnd: Clock,
-  workDays: readonly number[],
 ): Promise<DayDocument> {
   const existing = await readDay(vault, date, workStart, workEnd);
   if (existing !== null) return { ...existing, tasks: normalizePriorities(existing.tasks) };
 
   const keys = await listDayKeys(vault);
   const previousKey = previousDayKey(keys, date);
-  if (previousKey === null || !withinCarryOverHorizon(previousKey, date, workDays)) {
-    return createDay(date, workStart, workEnd);
-  }
+  if (previousKey === null) return createDay(date, workStart, workEnd);
 
   const previous = await readDay(vault, previousKey, workStart, workEnd);
   const carried = previous === null ? [] : carryOverTasks(previous.tasks, previousKey);

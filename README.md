@@ -239,8 +239,10 @@ hour.
 
 Non-working days are silent. Which days those are is `workDays`, not a
 weekend flag — a Tuesday-to-Saturday shift or a four-day week is just a different
-list. Monday still inherits Friday's unfinished work: carry-over looks back up to
-four calendar days, which spans a weekend and a long weekend.
+list. Monday still inherits Friday's unfinished work, and so does the day you come
+back from a fortnight off: carry-over always comes from the last day you logged,
+however long ago that was. Delete what has gone stale; each carried task keeps
+the date it first appeared.
 
 The wording follows the same list. The last wrap-up before your longest break
 reads **"Wrapping up the week"** and asks you to plan **Monday** rather than
