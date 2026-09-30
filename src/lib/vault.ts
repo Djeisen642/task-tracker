@@ -6,7 +6,7 @@
  * the browser dev loop. Everything above this line is pure and testable.
  */
 
-import { addDays, fromDateKey, isDateKey, toDateKey, type Clock, type DateKey } from './dates.ts';
+import { isDateKey, toDateKey, type Clock, type DateKey } from './dates.ts';
 import { createDay, parseDay, serializeDay, type DayDocument } from './markdown/day.ts';
 import {
   createTeamMember,
@@ -89,24 +89,6 @@ export function previousDayKey(keys: readonly DateKey[], date: DateKey): DateKey
   return best;
 }
 
-/**
- * How far back to look for tasks to carry forward.
- *
- * Bounded on purpose. Returning from a two-week holiday should not resurrect a
- * fortnight-stale to-do list into today's check-in; past this horizon the old
- * day file is still there to read, it just doesn't auto-populate.
- */
-export const CARRY_OVER_HORIZON_DAYS = 4;
-
-/** `true` when `previous` is recent enough to carry tasks from. */
-export function withinCarryOverHorizon(previous: DateKey, current: DateKey): boolean {
-  const from = fromDateKey(previous);
-  const to = fromDateKey(current);
-  if (from === null || to === null) return false;
-
-  return addDays(from, CARRY_OVER_HORIZON_DAYS).getTime() >= to.getTime();
-}
-
 /** Read and parse a day file, or `null` if it doesn't exist. */
 export async function readDay(
   vault: VaultPort,
@@ -128,8 +110,14 @@ export async function writeDay(vault: VaultPort, day: DayDocument): Promise<void
 /**
  * Load today's file, creating it (seeded with carried-over tasks) if absent.
  *
- * The create path is where a workday actually begins: yesterday's unfinished
- * work becomes today's starting list, which is what the day-start prompt shows.
+ * The create path is where a workday actually begins: the last logged day's
+ * unfinished work becomes today's starting list, which is what the day-start
+ * prompt shows.
+ *
+ * It carries from the most recent earlier file however long ago that was. There
+ * used to be a horizon, and it failed exactly when carry-over matters: back from
+ * a fortnight off, an empty list is the worst answer to "where was I?", while a
+ * stale one is a few clicks to clear (each carried task keeps its `added` date).
  *
  * The ranking is normalized on the way out, and this is the only read that does
  * it — `readDay` stays faithful to the bytes on disk, because the rollups
@@ -150,9 +138,7 @@ export async function openDay(
 
   const keys = await listDayKeys(vault);
   const previousKey = previousDayKey(keys, date);
-  if (previousKey === null || !withinCarryOverHorizon(previousKey, date)) {
-    return createDay(date, workStart, workEnd);
-  }
+  if (previousKey === null) return createDay(date, workStart, workEnd);
 
   const previous = await readDay(vault, previousKey, workStart, workEnd);
   const carried = previous === null ? [] : carryOverTasks(previous.tasks, previousKey);

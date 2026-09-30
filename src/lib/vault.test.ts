@@ -19,7 +19,6 @@ import {
   readTeamMember,
   teamFileName,
   todayKey,
-  withinCarryOverHorizon,
   writeDay,
   writeTeamMember,
 } from './vault.ts';
@@ -128,25 +127,6 @@ describe('previousDayKey', () => {
   });
 });
 
-describe('withinCarryOverHorizon', () => {
-  it('accepts consecutive days', () => {
-    expect(withinCarryOverHorizon('2026-08-03', '2026-08-04')).toBe(true);
-  });
-
-  it('accepts a weekend gap so Monday inherits from Friday', () => {
-    // 2026-07-31 is a Friday; 2026-08-03 is the following Monday.
-    expect(withinCarryOverHorizon('2026-07-31', '2026-08-03')).toBe(true);
-  });
-
-  it('rejects a stale list from a fortnight away', () => {
-    expect(withinCarryOverHorizon('2026-07-20', '2026-08-03')).toBe(false);
-  });
-
-  it('rejects malformed keys', () => {
-    expect(withinCarryOverHorizon('nope', '2026-08-03')).toBe(false);
-  });
-});
-
 describe('readDay / writeDay', () => {
   it('returns null for a day with no file', async () => {
     expect(await readDay(new MemoryVault(), '2026-08-02', HOURS.start, HOURS.end)).toBeNull();
@@ -215,11 +195,33 @@ describe('openDay', () => {
     expect(vault.snapshot()['2026-08-06.md']).toContain('_(added 2026-08-03)_');
   });
 
-  it('does not carry over from beyond the horizon', async () => {
+  it('carries over after PTO on Monday and Tuesday', async () => {
+    // Regression: Friday's file, Monday and Tuesday off, back on Wednesday. A
+    // four-calendar-day horizon refused that, so the list came back empty.
     const vault = new MemoryVault({
-      '2026-07-20.md': dayFile('2026-07-20', [{ title: 'Ancient', status: 'upcoming' }]),
+      '2026-07-31.md': dayFile('2026-07-31', [
+        { title: 'Carried', status: 'in-progress' },
+        { title: 'Finished', status: 'completed' },
+      ]),
     });
-    expect((await openDay(vault, '2026-08-04', HOURS.start, HOURS.end)).tasks).toEqual([]);
+
+    const day = await openDay(vault, '2026-08-05', HOURS.start, HOURS.end);
+    expect(day.tasks.map((task) => task.title)).toEqual(['Carried']);
+    expect(day.tasks[0]?.added).toBe('2026-07-31');
+  });
+
+  it.each([
+    ['a fortnight', '2026-08-14'],
+    ['a month', '2026-08-31'],
+    ['a year', '2027-07-31'],
+  ])('carries over from the last logged day after %s away', async (_label, returnDate) => {
+    const vault = new MemoryVault({
+      '2026-07-31.md': dayFile('2026-07-31', [{ title: 'Left mid-flight', status: 'in-progress' }]),
+    });
+
+    const day = await openDay(vault, returnDate, HOURS.start, HOURS.end);
+    expect(day.tasks.map((task) => task.title)).toEqual(['Left mid-flight']);
+    expect(day.tasks[0]?.added).toBe('2026-07-31');
   });
 
   it('carries from the most recent day, not the oldest', async () => {

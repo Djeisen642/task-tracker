@@ -36,7 +36,7 @@ These ship in v0.1. The app is not usable without them.
 | done   | One Markdown file per day, frontmatter + `## Tasks` + `## Notes`.                                                                      |
 | done   | Hand edits survive: unowned sections and frontmatter keys are preserved verbatim.                                                      |
 | done   | Atomic writes (temp file + rename) so a crash can't truncate a day's notes.                                                            |
-| done   | Open tasks carry over to the next day, bounded by a 4-day horizon.                                                                     |
+| done   | Open tasks carry over to the next day, from the last logged day, however long ago.                                                     |
 | done   | `CONTEXT.md` regenerated on launch so an agent can read the schema.                                                                    |
 | done   | Inline `@person` and `#tag` parsing, with `#kudos` indexed for review season.                                                          |
 | done   | Filename allowlist enforced in Rust — nothing escapes the vault directory.                                                             |

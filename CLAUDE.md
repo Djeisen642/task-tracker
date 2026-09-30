@@ -141,6 +141,13 @@ docs/
   `Date.getDay()` numbers, because "the weekend" is Friday/Saturday in much of
   the world and plenty of people work four days or Tuesday-to-Saturday. Parsing
   still understands the superseded `includeWeekends` boolean.
+- **Carry-over has no horizon: it always comes from the last logged day.** There
+  used to be one (four calendar days, briefly five working days), and it failed
+  exactly when carry-over matters. Friday's list didn't survive two days of PTO,
+  and after a fortnight off an empty day is the worst possible answer to "where
+  was I?" while a stale list is a few clicks to clear, with each task still
+  showing its original `added` date. Don't reintroduce a cutoff to "protect"
+  the list; the old day file is never the thing that goes stale, the card is.
 - **The copy has to know about the weekend too, not just the scheduler.** The
   wrap-up asks you to plan `describeNextWorkingDay(…)` — "tomorrow" midweek,
   "Monday" on a Friday. Asked on a Friday to "plan tomorrow" you either plan a
