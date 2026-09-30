@@ -954,6 +954,7 @@ class CheckInController {
         slot.date,
         this.settings.workStart,
         this.settings.workEnd,
+        this.settings.workDays,
       );
     } catch (error) {
       await showError('Could not open your journal', describeError(error));
@@ -1858,7 +1859,13 @@ class CheckInController {
       const cached = this.day?.date === today ? this.day : null;
       const day =
         cached ??
-        (await openDay(this.vault, today, this.settings.workStart, this.settings.workEnd));
+        (await openDay(
+          this.vault,
+          today,
+          this.settings.workStart,
+          this.settings.workEnd,
+          this.settings.workDays,
+        ));
 
       const keys = await listDayKeys(this.vault);
       const previousKey = previousDayKey(keys, today);

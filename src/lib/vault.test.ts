@@ -25,6 +25,8 @@ import {
 } from './vault.ts';
 
 const HOURS = { start: '09:00', end: '17:00' };
+/** Monday to Friday, as `Date.getDay()` numbers. */
+const WORK_WEEK = [1, 2, 3, 4, 5];
 
 function dayFile(date: string, tasks: Parameters<typeof createDay>[3] = []) {
   return serializeDay(createDay(date, HOURS.start, HOURS.end, tasks));
@@ -129,21 +131,51 @@ describe('previousDayKey', () => {
 });
 
 describe('withinCarryOverHorizon', () => {
+  // 2026-07-31 is a Friday; 2026-08-03 is the following Monday.
   it('accepts consecutive days', () => {
-    expect(withinCarryOverHorizon('2026-08-03', '2026-08-04')).toBe(true);
+    expect(withinCarryOverHorizon('2026-08-03', '2026-08-04', WORK_WEEK)).toBe(true);
   });
 
   it('accepts a weekend gap so Monday inherits from Friday', () => {
-    // 2026-07-31 is a Friday; 2026-08-03 is the following Monday.
-    expect(withinCarryOverHorizon('2026-07-31', '2026-08-03')).toBe(true);
+    expect(withinCarryOverHorizon('2026-07-31', '2026-08-03', WORK_WEEK)).toBe(true);
+  });
+
+  it('accepts two days of PTO across a weekend: Friday to Wednesday', () => {
+    // The reported bug: five calendar days, but only Monday and Tuesday missed.
+    expect(withinCarryOverHorizon('2026-07-31', '2026-08-05', WORK_WEEK)).toBe(true);
+  });
+
+  it('accepts Thursday to Tuesday, whose weekend spends the calendar allowance', () => {
+    expect(withinCarryOverHorizon('2026-07-30', '2026-08-04', WORK_WEEK)).toBe(true);
+  });
+
+  it('accepts a whole working week off', () => {
+    // Mon 08-03 through Fri 08-07 missed: five working days, back on Monday.
+    expect(withinCarryOverHorizon('2026-07-31', '2026-08-10', WORK_WEEK)).toBe(true);
+  });
+
+  it('rejects once more than a working week has been missed', () => {
+    expect(withinCarryOverHorizon('2026-07-31', '2026-08-11', WORK_WEEK)).toBe(false);
   });
 
   it('rejects a stale list from a fortnight away', () => {
-    expect(withinCarryOverHorizon('2026-07-20', '2026-08-03')).toBe(false);
+    expect(withinCarryOverHorizon('2026-07-20', '2026-08-03', WORK_WEEK)).toBe(false);
+  });
+
+  it("counts the user's own working days, not Monday to Friday", () => {
+    // Monday 07-27 to Monday 08-03: four missed weekdays on a Monday-to-Friday
+    // week, but six missed days for someone who works all seven.
+    expect(withinCarryOverHorizon('2026-07-27', '2026-08-03', WORK_WEEK)).toBe(true);
+    expect(withinCarryOverHorizon('2026-07-27', '2026-08-03', [0, 1, 2, 3, 4, 5, 6])).toBe(false);
+  });
+
+  it('does not count the days between a Sunday-to-Thursday week', () => {
+    // Thursday 07-30 to Sunday 08-02: Friday and Saturday are the weekend.
+    expect(withinCarryOverHorizon('2026-07-30', '2026-08-02', [0, 1, 2, 3, 4])).toBe(true);
   });
 
   it('rejects malformed keys', () => {
-    expect(withinCarryOverHorizon('nope', '2026-08-03')).toBe(false);
+    expect(withinCarryOverHorizon('nope', '2026-08-03', WORK_WEEK)).toBe(false);
   });
 });
 
@@ -177,12 +209,12 @@ describe('openDay', () => {
     const vault = new MemoryVault({
       '2026-08-04.md': dayFile('2026-08-04', [{ title: 'Existing', status: 'in-progress' }]),
     });
-    const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end);
+    const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end, WORK_WEEK);
     expect(day.tasks).toEqual([{ title: 'Existing', status: 'in-progress', added: '2026-08-04' }]);
   });
 
   it('creates an empty day when the vault is empty', async () => {
-    const day = await openDay(new MemoryVault(), '2026-08-04', HOURS.start, HOURS.end);
+    const day = await openDay(new MemoryVault(), '2026-08-04', HOURS.start, HOURS.end, WORK_WEEK);
     expect(day.tasks).toEqual([]);
     expect(day.date).toBe('2026-08-04');
   });
@@ -196,7 +228,7 @@ describe('openDay', () => {
       ]),
     });
 
-    const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end);
+    const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end, WORK_WEEK);
     expect(day.tasks.map((task) => task.title)).toEqual(['Carried', 'Planned']);
     expect(day.tasks.every((task) => task.added === '2026-08-03')).toBe(true);
   });
@@ -207,10 +239,10 @@ describe('openDay', () => {
     });
 
     for (const date of ['2026-08-04', '2026-08-05', '2026-08-06']) {
-      await writeDay(vault, await openDay(vault, date, HOURS.start, HOURS.end));
+      await writeDay(vault, await openDay(vault, date, HOURS.start, HOURS.end, WORK_WEEK));
     }
 
-    const day = await openDay(vault, '2026-08-06', HOURS.start, HOURS.end);
+    const day = await openDay(vault, '2026-08-06', HOURS.start, HOURS.end, WORK_WEEK);
     expect(day.tasks[0]?.added).toBe('2026-08-03');
     expect(vault.snapshot()['2026-08-06.md']).toContain('_(added 2026-08-03)_');
   });
@@ -219,7 +251,25 @@ describe('openDay', () => {
     const vault = new MemoryVault({
       '2026-07-20.md': dayFile('2026-07-20', [{ title: 'Ancient', status: 'upcoming' }]),
     });
-    expect((await openDay(vault, '2026-08-04', HOURS.start, HOURS.end)).tasks).toEqual([]);
+    expect((await openDay(vault, '2026-08-04', HOURS.start, HOURS.end, WORK_WEEK)).tasks).toEqual(
+      [],
+    );
+  });
+
+  it('carries over after PTO on Monday and Tuesday', async () => {
+    // Regression: Friday's file, Monday and Tuesday off, back on Wednesday. That
+    // is five calendar days, which a four-day horizon refused, so the list came
+    // back empty. Only two working days were actually missed.
+    const vault = new MemoryVault({
+      '2026-07-31.md': dayFile('2026-07-31', [
+        { title: 'Carried', status: 'in-progress' },
+        { title: 'Finished', status: 'completed' },
+      ]),
+    });
+
+    const day = await openDay(vault, '2026-08-05', HOURS.start, HOURS.end, WORK_WEEK);
+    expect(day.tasks.map((task) => task.title)).toEqual(['Carried']);
+    expect(day.tasks[0]?.added).toBe('2026-07-31');
   });
 
   it('carries from the most recent day, not the oldest', async () => {
@@ -227,13 +277,13 @@ describe('openDay', () => {
       '2026-08-02.md': dayFile('2026-08-02', [{ title: 'Older', status: 'upcoming' }]),
       '2026-08-03.md': dayFile('2026-08-03', [{ title: 'Newer', status: 'upcoming' }]),
     });
-    const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end);
+    const day = await openDay(vault, '2026-08-04', HOURS.start, HOURS.end, WORK_WEEK);
     expect(day.tasks.map((task) => task.title)).toEqual(['Newer']);
   });
 
   it('does not write the new day to the vault as a side effect', async () => {
     const vault = new MemoryVault();
-    await openDay(vault, '2026-08-04', HOURS.start, HOURS.end);
+    await openDay(vault, '2026-08-04', HOURS.start, HOURS.end, WORK_WEEK);
     expect(vault.snapshot()).toEqual({});
   });
 });

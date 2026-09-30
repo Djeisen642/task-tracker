@@ -90,21 +90,42 @@ export function previousDayKey(keys: readonly DateKey[], date: DateKey): DateKey
 }
 
 /**
- * How far back to look for tasks to carry forward.
+ * How many working days may go by, unlogged, before a list stops carrying over.
  *
  * Bounded on purpose. Returning from a two-week holiday should not resurrect a
  * fortnight-stale to-do list into today's check-in; past this horizon the old
- * day file is still there to read, it just doesn't auto-populate.
+ * day file is still there to read, it just doesn't auto-populate. A whole
+ * working week off still carries: that is a holiday you come back from
+ * wanting to know where you left off.
+ *
+ * Counted in _working_ days, not calendar days. It was four calendar days,
+ * which a weekend spends on its own: Friday's list didn't survive Monday and
+ * Tuesday of PTO, and neither did Thursday's survive an ordinary Friday off.
  */
-export const CARRY_OVER_HORIZON_DAYS = 4;
+export const CARRY_OVER_HORIZON_WORKDAYS = 5;
 
-/** `true` when `previous` is recent enough to carry tasks from. */
-export function withinCarryOverHorizon(previous: DateKey, current: DateKey): boolean {
+/**
+ * `true` when `previous` is recent enough to carry tasks from `current`.
+ *
+ * `workDays` is `Date.getDay()` numbers, the same list the scheduler uses. Only
+ * the days strictly between the two dates count, and only when they are working
+ * days: the weekend, and a Friday-and-Saturday weekend, cost nothing.
+ */
+export function withinCarryOverHorizon(
+  previous: DateKey,
+  current: DateKey,
+  workDays: readonly number[],
+): boolean {
   const from = fromDateKey(previous);
   const to = fromDateKey(current);
   if (from === null || to === null) return false;
 
-  return addDays(from, CARRY_OVER_HORIZON_DAYS).getTime() >= to.getTime();
+  let missed = 0;
+  for (let day = addDays(from, 1); day.getTime() < to.getTime(); day = addDays(day, 1)) {
+    if (workDays.includes(day.getDay())) missed += 1;
+    if (missed > CARRY_OVER_HORIZON_WORKDAYS) return false;
+  }
+  return true;
 }
 
 /** Read and parse a day file, or `null` if it doesn't exist. */
@@ -144,13 +165,14 @@ export async function openDay(
   date: DateKey,
   workStart: Clock,
   workEnd: Clock,
+  workDays: readonly number[],
 ): Promise<DayDocument> {
   const existing = await readDay(vault, date, workStart, workEnd);
   if (existing !== null) return { ...existing, tasks: normalizePriorities(existing.tasks) };
 
   const keys = await listDayKeys(vault);
   const previousKey = previousDayKey(keys, date);
-  if (previousKey === null || !withinCarryOverHorizon(previousKey, date)) {
+  if (previousKey === null || !withinCarryOverHorizon(previousKey, date, workDays)) {
     return createDay(date, workStart, workEnd);
   }
 
